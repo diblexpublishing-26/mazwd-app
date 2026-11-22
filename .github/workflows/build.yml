@@ -19,8 +19,16 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Prepare Android SDK Licenses
+        run: |
+          mkdir -p "$ANDROID_HOME/licenses"
+          printf "\n24333f8a63b6825ea9c5514f83c2829b004d1fee\nd56f5187479451eabf01fb78af6dfcb131a6481e\n84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-license"
+          for sm in "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager; do
+            if [ -x "$sm" ]; then
+              yes | "$sm" --licenses > /dev/null 2>&1 || true
+              break
+            fi
+          done
 
       - name: Generate Gradle Project Files & Vector Icons
         run: |
@@ -31,20 +39,20 @@ jobs:
           mkdir -p app/src/main/res/drawable
           mkdir -p app/src/main/res/font
 
-          curl -f -sL "https://github.com/google/fonts/raw/main/ofl/tajawal/Tajawal-Regular.ttf" -o app/src/main/res/font/tajawal_regular.ttf
-          curl -f -sL "https://github.com/google/fonts/raw/main/ofl/tajawal/Tajawal-Bold.ttf" -o app/src/main/res/font/tajawal_bold.ttf
-          curl -f -sL "https://github.com/google/fonts/raw/main/ofl/arefruqaa/ArefRuqaa-Regular.ttf" -o app/src/main/res/font/aref_ruqaa.ttf
-          curl -f -sL "https://github.com/google/fonts/raw/main/ofl/arefruqaa/ArefRuqaa-Bold.ttf" -o app/src/main/res/font/aref_ruqaa_bold.ttf
-          curl -f -sL "https://github.com/google/fonts/raw/main/ofl/reemkufi/ReemKufi%5Bwght%5D.ttf" -o app/src/main/res/font/reem_kufi.ttf
-          cp app/src/main/res/font/reem_kufi.ttf app/src/main/res/font/reem_kufi_bold.ttf
+          curl -f -sL "https://github.com/google/fonts/raw/main/ofl/tajawal/Tajawal-Regular.ttf" -o app/src/main/res/font/tajawal_regular.ttf || true
+          curl -f -sL "https://github.com/google/fonts/raw/main/ofl/tajawal/Tajawal-Bold.ttf" -o app/src/main/res/font/tajawal_bold.ttf || true
+          curl -f -sL "https://github.com/google/fonts/raw/main/ofl/arefruqaa/ArefRuqaa-Regular.ttf" -o app/src/main/res/font/aref_ruqaa.ttf || true
+          curl -f -sL "https://github.com/google/fonts/raw/main/ofl/arefruqaa/ArefRuqaa-Bold.ttf" -o app/src/main/res/font/aref_ruqaa_bold.ttf || true
+          curl -f -sL "https://github.com/google/fonts/raw/main/ofl/reemkufi/ReemKufi%5Bwght%5D.ttf" -o app/src/main/res/font/reem_kufi.ttf || true
+          cp app/src/main/res/font/reem_kufi.ttf app/src/main/res/font/reem_kufi_bold.ttf 2>/dev/null || true
 
           curl -f -sL "https://github.com/notofonts/arabic/raw/main/fonts/NotoNaskhArabic/hinted/ttf/NotoNaskhArabic-Regular.ttf" -o app/src/main/res/font/mazwd_arabic.ttf \
             || curl -f -sL "https://github.com/google/fonts/raw/main/ofl/almarai/Almarai-Regular.ttf" -o app/src/main/res/font/mazwd_arabic.ttf \
-            || cp app/src/main/res/font/tajawal_regular.ttf app/src/main/res/font/mazwd_arabic.ttf
+            || cp app/src/main/res/font/tajawal_regular.ttf app/src/main/res/font/mazwd_arabic.ttf || true
 
           curl -f -sL "https://github.com/notofonts/arabic/raw/main/fonts/NotoNaskhArabic/hinted/ttf/NotoNaskhArabic-Bold.ttf" -o app/src/main/res/font/mazwd_arabic_bold.ttf \
             || curl -f -sL "https://github.com/google/fonts/raw/main/ofl/almarai/Almarai-Bold.ttf" -o app/src/main/res/font/mazwd_arabic_bold.ttf \
-            || cp app/src/main/res/font/mazwd_arabic.ttf app/src/main/res/font/mazwd_arabic_bold.ttf
+            || cp app/src/main/res/font/mazwd_arabic.ttf app/src/main/res/font/mazwd_arabic_bold.ttf || true
 
           for f in app/src/main/res/font/*.ttf; do
             if [ -f "$f" ] && ! file "$f" | grep -qiE "font|truetype|opentype|sfnt"; then
