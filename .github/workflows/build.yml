@@ -2,7 +2,7 @@ name: Build Mazwd APK
 
 on:
   push:
-    branches: [ "*" ]
+    branches: [ "**" ]
   workflow_dispatch:
 
 jobs:
@@ -10,137 +10,208 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
           java-version: '17'
+          distribution: 'temurin'
 
-      - name: Generate Project Structure & Download Arabic Fonts
+      - name: Assemble Android Project Structure & Fonts & Logo
         run: |
           mkdir -p app/src/main/java/com/mazwd/app
           mkdir -p app/src/main/res/values
           mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/drawable-nodpi
           mkdir -p app/src/main/res/font
 
-          FOUND_JAVA=$(find . -maxdepth 2 -iname "MainActivity*.java" | head -n 1)
-          if [ -n "$FOUND_JAVA" ]; then
-            grep -v '```' "$FOUND_JAVA" | grep -v '^---$' > app/src/main/java/com/mazwd/app/MainActivity.java
+          if [ -f "MainActivity.java" ]; then
+            grep -v '```' MainActivity.java | grep -v '^---$' > app/src/main/java/com/mazwd/app/MainActivity.java
           fi
 
-          # تحميل الخطوط العربية مفتوحة المصدر (الأميري + الرقعة + تجوال + ريم كوفي)
-          curl -L -s --fail "https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Regular.ttf" -o app/src/main/res/font/mazwd_arabic.ttf || rm -f app/src/main/res/font/mazwd_arabic.ttf
-          curl -L -s --fail "https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Bold.ttf" -o app/src/main/res/font/mazwd_arabic_bold.ttf || rm -f app/src/main/res/font/mazwd_arabic_bold.ttf
-          curl -L -s --fail "https://raw.githubusercontent.com/google/fonts/main/ofl/arefruqaa/ArefRuqaa-Regular.ttf" -o app/src/main/res/font/aref_ruqaa.ttf || rm -f app/src/main/res/font/aref_ruqaa.ttf
-          curl -L -s --fail "https://raw.githubusercontent.com/google/fonts/main/ofl/arefruqaa/ArefRuqaa-Bold.ttf" -o app/src/main/res/font/aref_ruqaa_bold.ttf || rm -f app/src/main/res/font/aref_ruqaa_bold.ttf
-          curl -L -s --fail "https://raw.githubusercontent.com/google/fonts/main/ofl/tajawal/Tajawal-Regular.ttf" -o app/src/main/res/font/tajawal_regular.ttf || rm -f app/src/main/res/font/tajawal_regular.ttf
-          curl -L -s --fail "https://raw.githubusercontent.com/google/fonts/main/ofl/tajawal/Tajawal-Bold.ttf" -o app/src/main/res/font/tajawal_bold.ttf || rm -f app/src/main/res/font/tajawal_bold.ttf
-          curl -L -s --fail "https://raw.githubusercontent.com/google/fonts/main/ofl/reemkufi/ReemKufi%5Bwght%5D.ttf" -o app/src/main/res/font/reem_kufi.ttf || rm -f app/src/main/res/font/reem_kufi.ttf
-          cp app/src/main/res/font/reem_kufi.ttf app/src/main/res/font/reem_kufi_bold.ttf 2>/dev/null || true
+          # إذا قام المستخدم برفع صورته باسم logo.png يتم وضع خلفية عاجية خلفها واعتمادها تلقائياً
+          if [ -f "logo.png" ]; then
+            if command -v convert >/dev/null 2>&1; then
+              convert logo.png -background "#FFFDF7" -gravity center -flatten app/src/main/res/drawable-nodpi/custom_logo.png || cp logo.png app/src/main/res/drawable-nodpi/custom_logo.png
+            else
+              cp logo.png app/src/main/res/drawable-nodpi/custom_logo.png
+            fi
+          fi
 
-          printf '%s\n' \
-            'pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }' \
-            'dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }' \
-            'rootProject.name = "MazwdNative"' \
-            'include ":app"' \
-            > settings.gradle
+          # تحميل الخطوط العربية مفتوحة المصدر
+          curl -f -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Regular.ttf" -o app/src/main/res/font/mazwd_arabic.ttf
+          curl -f -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Bold.ttf" -o app/src/main/res/font/mazwd_arabic_bold.ttf
+          curl -f -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/arefruqaa/ArefRuqaa-Regular.ttf" -o app/src/main/res/font/aref_ruqaa.ttf
+          curl -f -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/arefruqaa/ArefRuqaa-Bold.ttf" -o app/src/main/res/font/aref_ruqaa_bold.ttf
+          curl -f -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/tajawal/Tajawal-Regular.ttf" -o app/src/main/res/font/tajawal_regular.ttf
+          curl -f -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/tajawal/Tajawal-Bold.ttf" -o app/src/main/res/font/tajawal_bold.ttf
+          curl -f -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/reemkufi/ReemKufi%5Bwght%5D.ttf" -o app/src/main/res/font/reem_kufi.ttf
+          cp app/src/main/res/font/reem_kufi.ttf app/src/main/res/font/reem_kufi_bold.ttf
 
-          printf '%s\n' \
-            'plugins { id "com.android.application" version "8.5.2" apply false }' \
-            > build.gradle
+          cat << 'EOF' > settings.gradle
+          rootProject.name = "MazwdNotepad"
+          include ':app'
+          EOF
 
-          printf '%s\n' \
-            'plugins { id "com.android.application" }' \
-            'android {' \
-            '    namespace "com.mazwd.app"' \
-            '    compileSdk 34' \
-            '    defaultConfig {' \
-            '        applicationId "com.mazwd.app"' \
-            '        minSdk 27' \
-            '        targetSdk 34' \
-            '        versionCode 3' \
-            '        versionName "2.1"' \
-            '    }' \
-            '    buildTypes {' \
-            '        release {' \
-            '            minifyEnabled false' \
-            '            signingConfig signingConfigs.debug' \
-            '        }' \
-            '    }' \
-            '    compileOptions {' \
-            '        sourceCompatibility JavaVersion.VERSION_1_8' \
-            '        targetCompatibility JavaVersion.VERSION_1_8' \
-            '    }' \
-            '}' \
-            > app/build.gradle
+          cat << 'EOF' > build.gradle
+          buildscript {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.5.2'
+              }
+          }
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          EOF
 
-          printf '%s\n' \
-            '<?xml version="1.0" encoding="utf-8"?>' \
-            '<manifest xmlns:android="http://schemas.android.com/apk/res/android">' \
-            '    <application' \
-            '        android:theme="@style/AppTheme"' \
-            '        android:label="مفكرة مزود"' \
-            '        android:icon="@drawable/app_icon"' \
-            '        android:allowBackup="false"' \
-            '        android:supportsRtl="true">' \
-            '        <activity' \
-            '            android:name=".MainActivity"' \
-            '            android:screenOrientation="portrait"' \
-            '            android:windowSoftInputMode="adjustResize"' \
-            '            android:configChanges="orientation|screenSize|keyboardHidden"' \
-            '            android:exported="true">' \
-            '            <intent-filter>' \
-            '                <action android:name="android.intent.action.MAIN"/>' \
-            '                <category android:name="android.intent.category.LAUNCHER"/>' \
-            '            </intent-filter>' \
-            '        </activity>' \
-            '    </application>' \
-            '</manifest>' \
-            > app/src/main/AndroidManifest.xml
+          cat << 'EOF' > gradle.properties
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=false
+          EOF
 
-          printf '%s\n' \
-            '<?xml version="1.0" encoding="utf-8"?>' \
-            '<resources>' \
-            '    <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">' \
-            '        <item name="android:fontFamily">sans-serif</item>' \
-            '        <item name="android:colorPrimary">#154C79</item>' \
-            '        <item name="android:colorPrimaryDark">#0F385A</item>' \
-            '        <item name="android:colorAccent">#154C79</item>' \
-            '        <item name="android:navigationBarColor">#F4F6F9</item>' \
-            '        <item name="android:statusBarColor">#F4F6F9</item>' \
-            '        <item name="android:windowLightStatusBar">true</item>' \
-            '        <item name="android:windowLightNavigationBar">true</item>' \
-            '        <item name="android:windowActionModeOverlay">true</item>' \
-            '    </style>' \
-            '</resources>' \
-            > app/src/main/res/values/styles.xml
+          cat << 'EOF' > app/build.gradle
+          apply plugin: 'com.android.application'
 
-          printf '%s\n' \
-            '<?xml version="1.0" encoding="utf-8"?>' \
-            '<vector xmlns:android="http://schemas.android.com/apk/res/android"' \
-            '    android:width="108dp"' \
-            '    android:height="108dp"' \
-            '    android:viewportWidth="108"' \
-            '    android:viewportHeight="108">' \
-            '    <path android:fillColor="#154C79" android:pathData="M0,0h108v108h-108z"/>' \
-            '    <path android:fillColor="#FFFFFF" android:pathData="M32,26h44c3.3,0 6,2.7 6,6v44c0,3.3 -2.7,6 -6,6H32c-3.3,0 -6,-2.7 -6,-6V32C26,28.7 28.7,26 32,26z"/>' \
-            '    <path android:fillColor="#154C79" android:pathData="M36,40h36v4H36zM36,52h36v4H36zM36,64h22v4H36z"/>' \
-            '</vector>' \
-            > app/src/main/res/drawable/app_icon.xml
+          android {
+              namespace "com.mazwd.app"
+              compileSdk 34
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+              defaultConfig {
+                  applicationId "com.mazwd.app"
+                  minSdk 27
+                  targetSdk 34
+                  versionCode 4
+                  versionName "2.2"
+              }
+
+              signingConfigs {
+                   debug {
+                      // التوقيع الافتراضي للتثبيت المباشر على الهاتف
+                  }
+              }
+
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                      signingConfig signingConfigs.debug
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          EOF
+
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:allowBackup="true"
+                  android:label="مفكرة مزود"
+                  android:icon="@drawable/app_icon"
+                  android:roundIcon="@drawable/app_icon"
+                  android:supportsRtl="true"
+                  android:theme="@style/AppTheme">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:configChanges="orientation|screenSize|keyboardHidden"
+                      android:windowSoftInputMode="adjustResize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/values/styles.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+                  <item name="android:statusBarColor">#172554</item>
+                  <item name="android:windowBackground">#F5F7FA</item>
+              </style>
+          </resources>
+          EOF
+
+          # أيقونة التطبيق المرسومة بدقة من شعار مفكرة أ. شفيقة مزود (خلفية عاجية + دفتر حلزوني + حرف م + قلم مذهّب)
+          cat << 'EOF' > app/src/main/res/drawable/app_icon.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <!-- خلفية عاجية دافئة تبرز الشعار الكحلي والذهبي -->
+              <path
+                  android:fillColor="#FFFDF7"
+                  android:pathData="M18,4L90,4A14,14 0,0 1,104 18L104,90A14,14 0,0 1,90 104L18,104A14,14 0,0 1,4 90L4,18A14,14 0,0 1,18 4z" />
+              <!-- إطار ذهبي ناعم -->
+              <path
+                  android:strokeColor="#D97706"
+                  android:strokeWidth="2.5"
+                  android:fillColor="#00000000"
+                  android:pathData="M18,6L90,6A12,12 0,0 1,102 18L102,90A12,12 0,0 1,90 102L18,102A12,12 0,0 1,6 90L6,18A12,12 0,0 1,18 6z" />
+              <!-- غلاف الدفتر الأزرق -->
+              <path
+                  android:fillColor="#0A4D7A"
+                  android:pathData="M24,18L76,16A5,5 0,0 1,81 21L78,86A5,5 0,0 1,73 91L24,91A5,5 0,0 1,19 86L19,23A5,5 0,0 1,24 18z" />
+              <!-- ورقة الدفتر الكريمية -->
+              <path
+                  android:fillColor="#FFFBEB"
+                  android:pathData="M28,22L73,20L71,84L26,85z" />
+              <!-- سطور الدفتر -->
+              <path
+                  android:strokeColor="#D6D3D1"
+                  android:strokeWidth="1.8"
+                  android:pathData="M34,34L65,33 M34,44L64,43 M34,54L64,53 M34,64L63,63" />
+              <!-- حلقات الدفتر الحلزونية -->
+              <path
+                  android:strokeColor="#0284C7"
+                  android:strokeWidth="3.2"
+                  android:strokeLineCap="round"
+                  android:pathData="M15,30L25,30 M15,43L25,43 M15,56L25,56 M15,69L25,69" />
+              <!-- حرف الميم (م) الأزرق المتدفق -->
+              <path
+                  android:strokeColor="#07416B"
+                  android:strokeWidth="8.5"
+                  android:strokeLineCap="round"
+                  android:strokeLineJoin="round"
+                  android:fillColor="#00000000"
+                  android:pathData="M27,85 Q40,58 48,42 Q59,28 67,43 Q67,56 46,52" />
+              <!-- القلم الأزرق والذهبي -->
+              <path
+                  android:fillColor="#0A4D7A"
+                  android:pathData="M86,24L93,27L77,68L70,65z" />
+              <path
+                  android:fillColor="#D97706"
+                  android:pathData="M80,45L87,48L85,52L78,49z M70,65L77,68L71,79z" />
+          </vector>
+          EOF
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.7'
 
-      - name: Build Release APK
+      - name: Build APK
         run: gradle assembleRelease --stacktrace
 
-      - name: Upload APK
+      - name: Upload Ready APK
         uses: actions/upload-artifact@v4
         with:
           name: Mazwd-Notepad-APK
-          path: app/build/outputs/apk/release/*.apk
+          path: app/build/outputs/apk/release/app-release.apk
