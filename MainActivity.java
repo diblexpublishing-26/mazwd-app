@@ -8,13 +8,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.database.Cursor;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Paint;
-import android.graphics.Path;
-import android.graphics.RectF;
+import android.graphics.PorterDuff;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -39,7 +34,6 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.AbsListView;
-import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
@@ -48,8 +42,6 @@ import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.RadioButton;
-import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.Spinner;
@@ -139,6 +131,20 @@ public class MainActivity extends Activity {
             "التاريخ والوقت"
     };
 
+    private static final String[] TOOL_ICON_RES = {
+            "ic_undo",
+            "ic_redo",
+            "ic_copy",
+            "ic_paste",
+            "ic_select_all",
+            "ic_auto_format",
+            "ic_signature",
+            "ic_cut",
+            "ic_select_up",
+            "ic_select_down",
+            "ic_datetime"
+    };
+
     private static final String[] DEFAULT_ENABLED_TOOLS = {
             "undo",
             "redo",
@@ -149,8 +155,8 @@ public class MainActivity extends Activity {
             "signature"
     };
 
-    private List<String> orderedToolIds = new ArrayList<>();
-    private Set<String> enabledToolIds = new HashSet<>();
+    private final List<String> orderedToolIds = new ArrayList<>();
+    private final Set<String> enabledToolIds = new HashSet<>();
 
     private static final String[] THEME_NAMES = {
             "الأزرق الملكي (افتراضي)",
@@ -174,17 +180,14 @@ public class MainActivity extends Activity {
             {0xFF1E293B, 0xFF0F172A, 0xFFF1F5F9}  // الكحلي الكلاسيكي
     };
 
-    private int COLOR_BG = 0xFFF5F7FA;
-    private int COLOR_CARD = 0xFFFFFFFF;
+    private final int COLOR_BG = 0xFFF4F6F9;
+    private final int COLOR_CARD = 0xFFFFFFFF;
     private int COLOR_PRIMARY = 0xFF1E3A8A;
     private int COLOR_PRIMARY_DARK = 0xFF172554;
     private int COLOR_ACCENT_SOFT = 0xFFEFF6FF;
     private final int COLOR_TEXT_PRIMARY = 0xFF111827;
     private final int COLOR_TEXT_SECONDARY = 0xFF6B7280;
     private final int COLOR_DIVIDER = 0xFFE5E7EB;
-    private final int COLOR_DANGER = 0xFFDC2626;
-    private final int COLOR_DANGER_SOFT = 0xFFFEF2F2;
-    private final int COLOR_PAPER = 0xFFFFFDF9;
 
     private SharedPreferences prefs;
     private Uri treeUri;
@@ -201,7 +204,6 @@ public class MainActivity extends Activity {
     private final Stack<String> undo = new Stack<>();
     private final Stack<String> redo = new Stack<>();
     private String lastText = "";
-
     private final Map<Uri, String> searchSnippets = new HashMap<>();
 
     private final Handler autoSaveHandler = new Handler(Looper.getMainLooper());
@@ -240,11 +242,11 @@ public class MainActivity extends Activity {
         showToolbar = prefs.getBoolean("show_toolbar", true);
         toolbarIconsOnly = prefs.getBoolean("toolbar_icons_only", false);
 
-        if (!prefs.getBoolean("signature_initialized_v2", false)) {
+        if (!prefs.getBoolean("sig_init_v3", false)) {
             signatureText = prefs.getString("custom_signature", DEFAULT_SIGNATURE);
             prefs.edit()
                     .putString("custom_signature", signatureText)
-                    .putBoolean("signature_initialized_v2", true)
+                    .putBoolean("sig_init_v3", true)
                     .apply();
         } else {
             signatureText = prefs.getString("custom_signature", "");
@@ -276,13 +278,12 @@ public class MainActivity extends Activity {
 
     private void loadToolsConfig() {
         orderedToolIds.clear();
-        String savedOrder = prefs.getString("toolbar_order_v2", null);
+        String savedOrder = prefs.getString("toolbar_order_v3", null);
         if (savedOrder != null && !savedOrder.trim().isEmpty()) {
-            String[] parts = savedOrder.split(",");
-            for (String id : parts) {
-                String clean = id.trim();
-                if (isValidToolId(clean) && !orderedToolIds.contains(clean)) {
-                    orderedToolIds.add(clean);
+            for (String part : savedOrder.split(",")) {
+                String id = part.trim();
+                if (toolIndex(id) >= 0 && !orderedToolIds.contains(id)) {
+                    orderedToolIds.add(id);
                 }
             }
         }
@@ -292,13 +293,13 @@ public class MainActivity extends Activity {
             }
         }
 
-        Set<String> savedEnabled = prefs.getStringSet("enabled_tools_v2", null);
+        Set<String> savedEnabled = prefs.getStringSet("enabled_tools_v3", null);
         enabledToolIds.clear();
         if (savedEnabled == null) {
             enabledToolIds.addAll(Arrays.asList(DEFAULT_ENABLED_TOOLS));
         } else {
             for (String id : savedEnabled) {
-                if (isValidToolId(id)) {
+                if (toolIndex(id) >= 0) {
                     enabledToolIds.add(id);
                 }
             }
@@ -312,23 +313,26 @@ public class MainActivity extends Activity {
             sb.append(orderedToolIds.get(i));
         }
         prefs.edit()
-                .putString("toolbar_order_v2", sb.toString())
-                .putStringSet("enabled_tools_v2", new HashSet<>(enabledToolIds))
+                .putString("toolbar_order_v3", sb.toString())
+                .putStringSet("enabled_tools_v3", new HashSet<>(enabledToolIds))
                 .apply();
     }
 
-    private boolean isValidToolId(String id) {
-        for (String t : TOOL_IDS) {
-            if (t.equals(id)) return true;
+    private int toolIndex(String id) {
+        for (int i = 0; i < TOOL_IDS.length; i++) {
+            if (TOOL_IDS[i].equals(id)) return i;
         }
-        return false;
+        return -1;
     }
 
     private String getToolLabel(String id) {
-        for (int i = 0; i < TOOL_IDS.length; i++) {
-            if (TOOL_IDS[i].equals(id)) return TOOL_LABELS[i];
-        }
-        return id;
+        int idx = toolIndex(id);
+        return idx >= 0 ? TOOL_LABELS[idx] : id;
+    }
+
+    private String getToolIconResName(String id) {
+        int idx = toolIndex(id);
+        return idx >= 0 ? TOOL_ICON_RES[idx] : "ic_auto_format";
     }
 
     private void applyThemeColors() {
@@ -340,7 +344,7 @@ public class MainActivity extends Activity {
         if (window != null) {
             window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
             window.setStatusBarColor(COLOR_PRIMARY_DARK);
-            window.setNavigationBarColor(COLOR_BG);
+            window.setNavigationBarColor(COLOR_CARD);
         }
     }
 
@@ -355,7 +359,7 @@ public class MainActivity extends Activity {
 
     private boolean hasTreePermission(Uri uri) {
         try {
-            for ( android.content.UriPermission p : getContentResolver().getPersistedUriPermissions()) {
+            for (android.content.UriPermission p : getContentResolver().getPersistedUriPermissions()) {
                 if (p.getUri().equals(uri) && p.isReadPermission() && p.isWritePermission()) {
                     return true;
                 }
@@ -382,16 +386,17 @@ public class MainActivity extends Activity {
             card.setElevation(dp(4));
         }
 
-        View logoView = createLogoBadgeView(dp(84));
-        LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(dp(84), dp(84));
-        logoLp.bottomMargin = dp(16);
-        logoView.setLayoutParams(logoLp);
+        TextView icon = new TextView(this);
+        icon.setText("📓");
+        icon.setTextSize(TypedValue.COMPLEX_UNIT_SP, 48);
+        icon.setGravity(Gravity.CENTER);
 
         TextView title = new TextView(this);
         title.setText("مفكرة أ. شفيقة مزود");
         title.setTextColor(COLOR_TEXT_PRIMARY);
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
         title.setGravity(Gravity.CENTER);
+        title.setPadding(0, dp(12), 0, dp(4));
         applyFont(title, true);
 
         TextView sub = new TextView(this);
@@ -399,11 +404,11 @@ public class MainActivity extends Activity {
         sub.setTextColor(COLOR_PRIMARY);
         sub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         sub.setGravity(Gravity.CENTER);
-        sub.setPadding(0, dp(4), 0, dp(12));
+        sub.setPadding(0, 0, 0, dp(12));
         applyFont(sub, true);
 
         TextView info = new TextView(this);
-        info.setText("مرحباً بك. للبدء في حفظ مقالاتك وأبحاثك النصية بأمان، يرجى اختيار أو إنشاء مجلد خاص بالمفكرة على هاتفك (يُطلب مرة واحدة فقط).");
+        info.setText("مرحباً بك. للبدء في حفظ مقالاتك وملفاتك النصية بأمان، يرجى اختيار أو إنشاء مجلد خاص بالمفكرة على هاتفك (يُطلب مرة واحدة فقط).");
         info.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         info.setTextColor(COLOR_TEXT_SECONDARY);
         info.setGravity(Gravity.CENTER);
@@ -421,7 +426,7 @@ public class MainActivity extends Activity {
         });
         pick.setPadding(dp(28), dp(14), dp(28), dp(14));
 
-        card.addView(logoView);
+        card.addView(icon);
         card.addView(title);
         card.addView(sub);
         card.addView(info);
@@ -452,114 +457,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    private View createLogoBadgeView(int sizePx) {
-        final int customResId = getResources().getIdentifier("custom_logo", "drawable", getPackageName());
-        if (customResId != 0) {
-            try {
-                final Bitmap bmp = BitmapFactory.decodeResource(getResources(), customResId);
-                if (bmp != null) {
-                    ImageView iv = new ImageView(this);
-                    iv.setImageBitmap(bmp);
-                    iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                    int pad = Math.max(dp(4), sizePx / 12);
-                    iv.setPadding(pad, pad, pad, pad);
-                    iv.setBackground(roundRect(0xFFFFFDF7, sizePx / 4, 0xFFD97706));
-                    return iv;
-                }
-            } catch (Exception ignored) {
-            }
-        }
-
-        return new View(this) {
-            private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-            private final Path path = new Path();
-            private final RectF rect = new RectF();
-
-            @Override
-            protected void onDraw(Canvas canvas) {
-                super.onDraw(canvas);
-                float w = getWidth();
-                float h = getHeight();
-                if (w <= 0 || h <= 0) return;
-
-                // خلفية عاجية دافئة بإطار ذهبي ناعم
-                rect.set(dp(1), dp(1), w - dp(1), h - dp(1));
-                p.setStyle(Paint.Style.FILL);
-                p.setColor(0xFFFFFDF7);
-                canvas.drawRoundRect(rect, w * 0.24f, h * 0.24f, p);
-
-                p.setStyle(Paint.Style.STROKE);
-                p.setStrokeWidth(dp(1.5f));
-                p.setColor(0xFFD97706);
-                canvas.drawRoundRect(rect, w * 0.24f, h * 0.24f, p);
-
-                // الدفتر الأزرق والورقة العاجية
-                float nbLeft = w * 0.20f;
-                float nbTop = h * 0.16f;
-                float nbRight = w * 0.74f;
-                float nbBottom = h * 0.84f;
-
-                rect.set(nbLeft, nbTop, nbRight, nbBottom);
-                p.setStyle(Paint.Style.FILL);
-                p.setColor(0xFF0A4D7A);
-                canvas.drawRoundRect(rect, dp(5), dp(5), p);
-
-                rect.set(nbLeft + w * 0.05f, nbTop + h * 0.04f, nbRight - w * 0.04f, nbBottom - h * 0.05f);
-                p.setColor(0xFFFFFBEB);
-                canvas.drawRoundRect(rect, dp(3), dp(3), p);
-
-                // سطور خفيفة داخل الورقة
-                p.setColor(0xFFD6D3D1);
-                p.setStrokeWidth(dp(1.1f));
-                for (int i = 1; i <= 4; i++) {
-                    float ly = nbTop + h * (0.14f + i * 0.11f);
-                    canvas.drawLine(nbLeft + w * 0.12f, ly, nbRight - w * 0.12f, ly, p);
-                }
-
-                // حلقات الدفتر الحلزونية على اليسار
-                p.setStyle(Paint.Style.STROKE);
-                p.setStrokeWidth(dp(1.8f));
-                p.setColor(0xFF0284C7);
-                for (int i = 0; i < 4; i++) {
-                    float ry = nbTop + h * (0.14f + i * 0.15f);
-                    canvas.drawLine(w * 0.14f, ry, nbLeft + w * 0.04f, ry, p);
-                }
-
-                // حرف "م" الأزرق المتدفق في قلب الدفتر
-                p.setStyle(Paint.Style.STROKE);
-                p.setStrokeWidth(w * 0.085f);
-                p.setStrokeCap(Paint.Cap.ROUND);
-                p.setStrokeJoin(Paint.Join.ROUND);
-                p.setColor(0xFF07416B);
-                path.reset();
-                path.moveTo(w * 0.25f, h * 0.80f);
-                path.quadTo(w * 0.38f, h * 0.56f, w * 0.45f, h * 0.40f);
-                path.quadTo(w * 0.56f, h * 0.28f, w * 0.64f, h * 0.42f);
-                path.quadTo(w * 0.64f, h * 0.54f, w * 0.44f, h * 0.50f);
-                canvas.drawPath(path, p);
-
-                // القلم الأزرق المذهّب على اليمين
-                canvas.save();
-                canvas.rotate(22f, w * 0.78f, h * 0.50f);
-                rect.set(w * 0.73f, h * 0.22f, w * 0.83f, h * 0.64f);
-                p.setStyle(Paint.Style.FILL);
-                p.setColor(0xFF0A4D7A);
-                canvas.drawRoundRect(rect, dp(3), dp(3), p);
-
-                // حلقة ذهبية وسن القلم الذهبي
-                p.setColor(0xFFD97706);
-                canvas.drawRect(w * 0.73f, h * 0.42f, w * 0.83f, h * 0.46f, p);
-                path.reset();
-                path.moveTo(w * 0.74f, h * 0.64f);
-                path.lineTo(w * 0.82f, h * 0.64f);
-                path.lineTo(w * 0.78f, h * 0.77f);
-                path.close();
-                canvas.drawPath(path, p);
-                canvas.restore();
-            }
-        };
-    }
-
     private void showHome() {
         mode = Mode.HOME;
         currentFile = null;
@@ -567,11 +464,11 @@ public class MainActivity extends Activity {
         autoSaveHandler.removeCallbacks(autoSaveRunnable);
         root.removeAllViews();
 
-        // البطاقة العلوية المخصّصة للأستاذة شفيقة مزود
+        // البطاقة العلوية الفخمة بنفس تصميم 2.1 المحبوب
         LinearLayout heroHeader = new LinearLayout(this);
         heroHeader.setOrientation(LinearLayout.VERTICAL);
         heroHeader.setBackground(createHeaderGradient());
-        heroHeader.setPadding(dp(20), dp(20), dp(20), dp(20));
+        heroHeader.setPadding(dp(22), dp(22), dp(22), dp(22));
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             heroHeader.setElevation(dp(6));
         }
@@ -580,11 +477,6 @@ public class MainActivity extends Activity {
         topRow.setOrientation(LinearLayout.HORIZONTAL);
         topRow.setGravity(Gravity.CENTER_VERTICAL);
 
-        View logoBadge = createLogoBadgeView(dp(50));
-        LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(dp(50), dp(50));
-        logoLp.leftMargin = dp(12);
-        logoBadge.setLayoutParams(logoLp);
-
         LinearLayout titleBox = new LinearLayout(this);
         titleBox.setOrientation(LinearLayout.VERTICAL);
         titleBox.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
@@ -592,14 +484,14 @@ public class MainActivity extends Activity {
         TextView appTitle = new TextView(this);
         appTitle.setText("مفكرة أ. شفيقة مزود");
         appTitle.setTextColor(Color.WHITE);
-        appTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 21);
+        appTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 23);
         applyFont(appTitle, true);
 
         TextView appSub = new TextView(this);
         appSub.setText("كاتبة وباحثة في التراث الحضرمي");
-        appSub.setTextColor(0xFFDBEAFE);
-        appSub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        appSub.setPadding(0, dp(2), 0, 0);
+        appSub.setTextColor(0xFFE0E7FF);
+        appSub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
+        appSub.setPadding(0, dp(4), 0, 0);
         applyFont(appSub, false);
 
         titleBox.addView(appTitle);
@@ -611,11 +503,10 @@ public class MainActivity extends Activity {
         addBtn.setTextColor(COLOR_PRIMARY_DARK);
         addBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         addBtn.setBackground(roundRect(Color.WHITE, dp(14), Color.WHITE));
-        addBtn.setPadding(dp(14), dp(8), dp(14), dp(8));
+        addBtn.setPadding(dp(16), dp(10), dp(16), dp(10));
         applyFont(addBtn, true);
         addBtn.setOnClickListener(v -> createNewFileDialog());
 
-        topRow.addView(logoBadge);
         topRow.addView(titleBox);
         topRow.addView(addBtn);
         heroHeader.addView(topRow);
@@ -644,22 +535,22 @@ public class MainActivity extends Activity {
         badgeTxt.setText("TXT");
         badgeTxt.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         badgeTxt.setTextColor(COLOR_PRIMARY);
-        badgeTxt.setBackground(roundRect(COLOR_ACCENT_SOFT, dp(8), COLOR_ACCENT_SOFT));
-        badgeTxt.setPadding(dp(10), dp(4), dp(10), dp(4));
+        badgeTxt.setBackground(roundRect(COLOR_ACCENT_SOFT, dp(10), COLOR_ACCENT_SOFT));
+        badgeTxt.setPadding(dp(12), dp(5), dp(12), dp(5));
         applyFont(badgeTxt, true);
 
         sectionRow.addView(listLabel);
         sectionRow.addView(badgeTxt);
         contentArea.addView(sectionRow);
 
-        // شريط البحث الشامل (يبحث في العناوين والمحتوى معاً) + زر الفرز
+        // شريط البحث الشامل + زر الفرز
         LinearLayout searchSortRow = new LinearLayout(this);
         searchSortRow.setOrientation(LinearLayout.HORIZONTAL);
         searchSortRow.setGravity(Gravity.CENTER_VERTICAL);
         searchSortRow.setPadding(0, 0, 0, dp(10));
 
         EditText searchInput = new EditText(this);
-        searchInput.setHint("🔍 ابحث في العناوين ومحتوى المستندات...");
+        searchInput.setHint("🔍 ابحث في أسماء ومحتوى ملفاتك...");
         searchInput.setHintTextColor(COLOR_TEXT_SECONDARY);
         searchInput.setTextColor(COLOR_TEXT_PRIMARY);
         searchInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
@@ -722,29 +613,30 @@ public class MainActivity extends Activity {
 
         root.addView(contentArea);
 
-        // الشريط السفلي
+        // الشريط السفلي الفخم (زرّان فقط جنباً إلى جنب كما في 2.1: الإعدادات + نسخ احتياطي بلون مميز)
         LinearLayout bottomBar = new LinearLayout(this);
         bottomBar.setOrientation(LinearLayout.HORIZONTAL);
         bottomBar.setGravity(Gravity.CENTER);
         bottomBar.setBackgroundColor(COLOR_CARD);
-        bottomBar.setPadding(dp(12), dp(10), dp(12), dp(10));
+        bottomBar.setPadding(dp(16), dp(12), dp(16), dp(12));
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            bottomBar.setElevation(dp(8));
+            bottomBar.setElevation(dp(10));
         }
 
-        Button settingsBtn = createBottomNavButton("⚙ الإعدادات", this::showSettingsDialog);
-        Button backupBtn = createBottomNavButton("📦 نسخ احتياطي", this::backupNow);
-        Button aboutBtn = createBottomNavButton("ℹ عن التطبيق", this::showAboutDialog);
+        Button settingsBtn = createSecondaryButton("⚙ الإعدادات", this::showSettingsDialog);
+        settingsBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        settingsBtn.setPadding(dp(14), dp(12), dp(14), dp(12));
+
+        Button backupBtn = createPrimaryButton("📦 نسخ احتياطي (ZIP)", this::backupNow);
+        backupBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        backupBtn.setPadding(dp(14), dp(12), dp(14), dp(12));
 
         LinearLayout.LayoutParams navLp1 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
-        navLp1.leftMargin = dp(6);
+        navLp1.leftMargin = dp(10);
         LinearLayout.LayoutParams navLp2 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
-        navLp2.leftMargin = dp(6);
-        LinearLayout.LayoutParams navLp3 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
 
         bottomBar.addView(settingsBtn, navLp1);
         bottomBar.addView(backupBtn, navLp2);
-        bottomBar.addView(aboutBtn, navLp3);
         root.addView(bottomBar);
 
         refreshFiles();
@@ -799,7 +691,7 @@ public class MainActivity extends Activity {
             if (q.isEmpty()) {
                 statsView.setText("عدد الملفات: " + list.size() + " ملف TXT");
             } else {
-                statsView.setText("نتائج البحث في العناوين والمحتوى: " + list.size() + " من أصل " + allList.size());
+                statsView.setText("نتائج البحث: " + list.size() + " من أصل " + allList.size());
             }
         }
 
@@ -897,7 +789,7 @@ public class MainActivity extends Activity {
             snippetView.setTextColor(COLOR_TEXT_PRIMARY);
             snippetView.setMaxLines(2);
             snippetView.setEllipsize(TextUtils.TruncateAt.END);
-            snippetView.setPadding(dp(8), dp(6), dp(8), dp(6));
+            snippetView.setPadding(dp(10), dp(6), dp(10), dp(6));
             snippetView.setBackground(roundRect(COLOR_ACCENT_SOFT, dp(8), COLOR_ACCENT_SOFT));
             LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -912,10 +804,16 @@ public class MainActivity extends Activity {
             read(f);
         });
 
-        // زر الثلاث نقاط مرسوم هندسياً في المنتصف تماماً
-        View moreBtn = createMoreDotsButton(() -> showFileActions(f));
+        // زر الثلاث نقاط بأيقونة فيكتور متوسطة 100% في قلب المربع
+        FrameLayout moreBtn = new FrameLayout(this);
+        moreBtn.setBackground(roundRect(COLOR_ACCENT_SOFT, dp(12), COLOR_ACCENT_SOFT));
+        ImageView dotsIcon = createVectorImageView("ic_more_vert", dp(22), COLOR_PRIMARY);
+        FrameLayout.LayoutParams dlp = new FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER);
+        moreBtn.addView(dotsIcon, dlp);
+        moreBtn.setOnClickListener(v -> showFileActions(f));
+
         LinearLayout.LayoutParams moreLp = new LinearLayout.LayoutParams(dp(42), dp(42));
-        moreLp.rightMargin = dp(8);
+        moreLp.rightMargin = dp(10);
         moreBtn.setLayoutParams(moreLp);
 
         card.addView(textContainer);
@@ -927,29 +825,16 @@ public class MainActivity extends Activity {
         return card;
     }
 
-    private View createMoreDotsButton(Runnable onClick) {
-        View v = new View(this) {
-            private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-
-            @Override
-            protected void onDraw(Canvas canvas) {
-                super.onDraw(canvas);
-                p.setColor(COLOR_PRIMARY);
-                p.setStyle(Paint.Style.FILL);
-                float cx = getWidth() / 2f;
-                float cy = getHeight() / 2f;
-                float r = dp(2.3f);
-                float gap = dp(6.2f);
-                canvas.drawCircle(cx, cy - gap, r, p);
-                canvas.drawCircle(cx, cy, r, p);
-                canvas.drawCircle(cx, cy + gap, r, p);
-            }
-        };
-        v.setBackground(roundRect(COLOR_ACCENT_SOFT, dp(12), COLOR_ACCENT_SOFT));
-        v.setClickable(true);
-        v.setFocusable(true);
-        v.setOnClickListener(view -> onClick.run());
-        return v;
+    private ImageView createVectorImageView(String drawableName, int sizePx, int tintColor) {
+        ImageView iv = new ImageView(this);
+        int resId = getResources().getIdentifier(drawableName, "drawable", getPackageName());
+        if (resId != 0) {
+            iv.setImageResource(resId);
+        }
+        iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        iv.setColorFilter(tintColor, PorterDuff.Mode.SRC_IN);
+        iv.setLayoutParams(new ViewGroup.LayoutParams(sizePx, sizePx));
+        return iv;
     }
 
     private SpannableString highlightQueryInText(String text, String query) {
@@ -1008,54 +893,54 @@ public class MainActivity extends Activity {
         startActivity(Intent.createChooser(sendIntent, "مشاركة: " + displayName(f)));
     }
 
-    // بناء الشريط العلوي الموحد للمستند (الخيار الثاني: سهم الرجوع + اسم المستند + كبسولة التكبير)
+    // الشريط العلوي الفخم والحديث داخل المستند: [ ← رجوع ] [ اسم المستند بمساحة واسعة ] [ + 116% - ]
     private LinearLayout buildDocumentTopBar(DocFile f) {
         LinearLayout docHeader = new LinearLayout(this);
         docHeader.setOrientation(LinearLayout.HORIZONTAL);
         docHeader.setGravity(Gravity.CENTER_VERTICAL);
         docHeader.setBackgroundColor(COLOR_CARD);
-        docHeader.setPadding(dp(10), dp(10), dp(10), dp(10));
+        docHeader.setPadding(dp(12), dp(10), dp(12), dp(10));
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             docHeader.setElevation(dp(4));
         }
 
-        // زر الرجوع المدمج في اليمين
         Button backBtn = new Button(this);
-        backBtn.setText("→");
+        backBtn.setText("→ رجوع");
         backBtn.setAllCaps(false);
-        backBtn.setTextColor(COLOR_PRIMARY);
-        backBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        backBtn.setTextColor(COLOR_PRIMARY_DARK);
+        backBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
         backBtn.setBackground(roundRect(COLOR_ACCENT_SOFT, dp(12), COLOR_ACCENT_SOFT));
-        backBtn.setPadding(0, 0, 0, 0);
-        LinearLayout.LayoutParams backLp = new LinearLayout.LayoutParams(dp(42), dp(40));
-        backBtn.setLayoutParams(backLp);
+        backBtn.setPadding(dp(12), dp(6), dp(12), dp(6));
+        backBtn.setMinimumWidth(0);
+        backBtn.setMinWidth(0);
+        backBtn.setMinimumHeight(0);
+        backBtn.setMinHeight(0);
+        applyFont(backBtn, true);
         backBtn.setOnClickListener(v -> goBack());
 
-        // اسم المستند في الوسط بمساحة واسعة (وعند الضغط عليه يفتح إعادة التسمية)
         docTitle = new TextView(this);
         docTitle.setText(displayName(f));
         docTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
         docTitle.setTextColor(COLOR_TEXT_PRIMARY);
-        docTitle.setMaxLines(2);
+        docTitle.setMaxLines(1);
         docTitle.setEllipsize(TextUtils.TruncateAt.END);
         docTitle.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
         docTitle.setTextDirection(View.TEXT_DIRECTION_FIRST_STRONG_RTL);
-        docTitle.setPadding(dp(10), dp(4), dp(10), dp(4));
+        docTitle.setPadding(dp(12), dp(4), dp(10), dp(4));
         docTitle.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         applyFont(docTitle, true);
         docTitle.setOnClickListener(v -> rename(currentFile != null ? currentFile : f));
 
-        // كبسولة التكبير والتصغير المدمجة (+ 116% -) في اليسار
         LinearLayout zoomCapsule = new LinearLayout(this);
         zoomCapsule.setOrientation(LinearLayout.HORIZONTAL);
         zoomCapsule.setGravity(Gravity.CENTER_VERTICAL);
-        zoomCapsule.setBackground(roundRect(COLOR_ACCENT_SOFT, dp(12), COLOR_DIVIDER));
+        zoomCapsule.setBackground(roundRect(COLOR_BG, dp(12), COLOR_DIVIDER));
         zoomCapsule.setPadding(dp(2), dp(2), dp(2), dp(2));
 
         TextView plusBtn = new TextView(this);
         plusBtn.setText("＋");
         plusBtn.setTextColor(COLOR_PRIMARY);
-        plusBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        plusBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         plusBtn.setGravity(Gravity.CENTER);
         plusBtn.setPadding(dp(8), dp(4), dp(8), dp(4));
         plusBtn.setOnClickListener(v -> adjustZoomByStep(0.05f));
@@ -1063,16 +948,21 @@ public class MainActivity extends Activity {
         docZoomLabel = new TextView(this);
         docZoomLabel.setText(Math.round(fontScale * 100) + "%");
         docZoomLabel.setTextColor(COLOR_PRIMARY_DARK);
-        docZoomLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        docZoomLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
         docZoomLabel.setGravity(Gravity.CENTER);
         docZoomLabel.setPadding(dp(4), dp(4), dp(4), dp(4));
         applyFont(docZoomLabel, true);
-        docZoomLabel.setOnClickListener(v -> showQuickZoomDialog());
+        docZoomLabel.setOnClickListener(v -> {
+            fontScale = 1.0f;
+            prefs.edit().putFloat("font_scale", fontScale).apply();
+            applyCurrentZoomToDocument();
+            toast("تمت استعادة حجم الخط الافتراضي 100%");
+        });
 
         TextView minusBtn = new TextView(this);
         minusBtn.setText("－");
         minusBtn.setTextColor(COLOR_PRIMARY);
-        minusBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        minusBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         minusBtn.setGravity(Gravity.CENTER);
         minusBtn.setPadding(dp(8), dp(4), dp(8), dp(4));
         minusBtn.setOnClickListener(v -> adjustZoomByStep(-0.05f));
@@ -1108,59 +998,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void showQuickZoomDialog() {
-        AlertDialog.Builder b = new AlertDialog.Builder(this);
-        b.setCustomTitle(createDialogTitleView("🔍 التحكم بحجم الخط", false));
-
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(20), dp(14), dp(20), dp(10));
-
-        final TextView zoomVal = new TextView(this);
-        zoomVal.setText("الحجم الحالي: " + Math.round(fontScale * 100) + "%");
-        zoomVal.setTextColor(COLOR_TEXT_PRIMARY);
-        zoomVal.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        zoomVal.setGravity(Gravity.CENTER);
-        zoomVal.setPadding(0, 0, 0, dp(10));
-        applyFont(zoomVal, true);
-
-        final SeekBar seek = new SeekBar(this);
-        seek.setMax(140); // 60% .. 200%
-        seek.setProgress(Math.round((fontScale - 0.6f) * 100));
-        seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                fontScale = (60 + progress) / 100f;
-                zoomVal.setText("الحجم الحالي: " + (60 + progress) + "%");
-                applyCurrentZoomToDocument();
-            }
-            @Override
-            public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override
-            public void onStopTrackingTouch(SeekBar seekBar) {
-                prefs.edit().putFloat("font_scale", fontScale).apply();
-            }
-        });
-
-        Button resetBtn = createSecondaryButton("↺ استعادة الحجم الافتراضي (100%)", () -> {
-            fontScale = 1.0f;
-            seek.setProgress(40);
-            prefs.edit().putFloat("font_scale", fontScale).apply();
-            applyCurrentZoomToDocument();
-        });
-        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        rlp.topMargin = dp(12);
-        resetBtn.setLayoutParams(rlp);
-
-        box.addView(zoomVal);
-        box.addView(seek);
-        box.addView(resetBtn);
-        b.setView(box);
-        b.setPositiveButton("تم", null);
-        b.show();
-    }
-
     private void read(DocFile f) {
         mode = Mode.READ;
         currentFile = f;
@@ -1170,31 +1007,20 @@ public class MainActivity extends Activity {
 
         root.addView(buildDocumentTopBar(f));
 
+        View topDivider = new View(this);
+        topDivider.setBackgroundColor(COLOR_DIVIDER);
+        root.addView(topDivider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+
         String content = readText(f);
-
-        // شريط الإحصائيات الهادئ
-        LinearLayout metaBar = new LinearLayout(this);
-        metaBar.setOrientation(LinearLayout.HORIZONTAL);
-        metaBar.setGravity(Gravity.CENTER_VERTICAL);
-        metaBar.setBackgroundColor(0xFFF1F5F9);
-        metaBar.setPadding(dp(16), dp(8), dp(16), dp(8));
-
-        TextView metaText = new TextView(this);
-        metaText.setText(computeTextStats(content) + "   •   اضغط على النص للتعديل أو العنوان لتسميته");
-        metaText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        metaText.setTextColor(COLOR_TEXT_SECONDARY);
-        applyFont(metaText, false);
-        metaBar.addView(metaText);
-        root.addView(metaBar);
 
         readScrollView = new ScrollView(this);
         readScrollView.setFillViewport(true);
-        readScrollView.setBackgroundColor(COLOR_PAPER);
+        readScrollView.setBackgroundColor(COLOR_CARD);
 
         readView = new TextView(this);
         int firstMatchPos = -1;
         if (content.isEmpty()) {
-            readView.setText("هذا الملف فارغ حالياً.\n\nاضغط هنا للبدء في الكتابة...");
+            readView.setText("هذا الملف فارغ حالياً.\n\nاضغط هنا أو على زر «تحرير الملف» بالأسفل للبدء في الكتابة...");
             readView.setTextColor(COLOR_TEXT_SECONDARY);
         } else if (activeHighlightQuery != null && !activeHighlightQuery.isEmpty()) {
             firstMatchPos = content.toLowerCase(Locale.ROOT).indexOf(activeHighlightQuery.toLowerCase(Locale.ROOT));
@@ -1206,7 +1032,7 @@ public class MainActivity extends Activity {
         }
 
         readView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 21f * fontScale);
-        readView.setPadding(dp(22), dp(22), dp(22), dp(48));
+        readView.setPadding(dp(22), dp(22), dp(22), dp(40));
         readView.setLineSpacing(dp(6), 1.25f);
         readView.setTextDirection(View.TEXT_DIRECTION_FIRST_STRONG_RTL);
         applyFont(readView, false);
@@ -1216,7 +1042,44 @@ public class MainActivity extends Activity {
         root.addView(readScrollView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
 
-        // القفز التلقائي إلى موضع الكلمة المبحوث عنها
+        // شريط الإحصائيات السفلي + زرا تحرير الملف ومشاركة الملف (كما في 2.1 بالضبط)
+        View bottomDivider = new View(this);
+        bottomDivider.setBackgroundColor(COLOR_DIVIDER);
+        root.addView(bottomDivider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+
+        TextView statsBar = new TextView(this);
+        statsBar.setText(computeTextStats(content));
+        statsBar.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
+        statsBar.setTextColor(COLOR_TEXT_SECONDARY);
+        statsBar.setBackgroundColor(COLOR_BG);
+        statsBar.setGravity(Gravity.CENTER);
+        statsBar.setPadding(dp(16), dp(8), dp(16), dp(8));
+        applyFont(statsBar, false);
+        root.addView(statsBar);
+
+        LinearLayout readBottomBar = new LinearLayout(this);
+        readBottomBar.setOrientation(LinearLayout.HORIZONTAL);
+        readBottomBar.setGravity(Gravity.CENTER);
+        readBottomBar.setBackgroundColor(COLOR_CARD);
+        readBottomBar.setPadding(dp(16), dp(10), dp(16), dp(12));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            readBottomBar.setElevation(dp(8));
+        }
+
+        Button editBtn = createPrimaryButton("✏️ تحرير الملف", () -> edit(f));
+        editBtn.setPadding(dp(14), dp(12), dp(14), dp(12));
+
+        Button shareBtn = createSecondaryButton("📤 مشاركة الملف", () -> shareFile(f));
+        shareBtn.setPadding(dp(14), dp(12), dp(14), dp(12));
+
+        LinearLayout.LayoutParams eLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.2f);
+        eLp.leftMargin = dp(10);
+        LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+
+        readBottomBar.addView(editBtn, eLp);
+        readBottomBar.addView(shareBtn, sLp);
+        root.addView(readBottomBar);
+
         if (firstMatchPos >= 0) {
             final int targetOffset = firstMatchPos;
             readView.post(() -> {
@@ -1225,7 +1088,7 @@ public class MainActivity extends Activity {
                         int safeOffset = Math.min(targetOffset, readView.getText().length());
                         int line = readView.getLayout().getLineForOffset(safeOffset);
                         int y = readView.getLayout().getLineTop(line);
-                        readScrollView.smoothScrollTo(0, Math.max(0, y - dp(90)));
+                        readScrollView.smoothScrollTo(0, Math.max(0, y - dp(80)));
                     }
                 } catch (Exception ignored) {
                 }
@@ -1240,31 +1103,29 @@ public class MainActivity extends Activity {
 
         root.addView(buildDocumentTopBar(f));
 
-        // شريط الإحصائيات الحية
-        final TextView liveStats = new TextView(this);
-        liveStats.setBackgroundColor(0xFFF1F5F9);
-        liveStats.setTextColor(COLOR_TEXT_SECONDARY);
-        liveStats.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        liveStats.setPadding(dp(16), dp(6), dp(16), dp(6));
-        applyFont(liveStats, false);
-        root.addView(liveStats);
+        View topDivider = new View(this);
+        topDivider.setBackgroundColor(COLOR_DIVIDER);
+        root.addView(topDivider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
 
-        // شريط أدوات التحرير حسب ترتيب واختيار المستخدم (رموز أو نصوص)
+        // شريط أدوات التحرير مرتباً من اليمين إلى اليسار حسب ترتيب المستخدم
         if (showToolbar && !enabledToolIds.isEmpty()) {
-            HorizontalScrollView toolsScroll = new HorizontalScrollView(this);
+            final HorizontalScrollView toolsScroll = new HorizontalScrollView(this);
             toolsScroll.setHorizontalScrollBarEnabled(false);
-            toolsScroll.setBackgroundColor(COLOR_CARD);
-            toolsScroll.setPadding(dp(8), dp(6), dp(8), dp(6));
+            toolsScroll.setBackgroundColor(COLOR_BG);
+            toolsScroll.setPadding(dp(10), dp(8), dp(10), dp(8));
+            toolsScroll.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
 
             LinearLayout tools = new LinearLayout(this);
             tools.setOrientation(LinearLayout.HORIZONTAL);
-            tools.setGravity(Gravity.CENTER_VERTICAL);
+            tools.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
+            tools.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
 
             for (String toolId : orderedToolIds) {
                 if (!enabledToolIds.contains(toolId)) continue;
                 tools.addView(createToolbarActionView(toolId));
             }
             toolsScroll.addView(tools);
+            toolsScroll.post(() -> toolsScroll.fullScroll(View.FOCUS_RIGHT));
             root.addView(toolsScroll);
 
             View divider = new View(this);
@@ -1280,18 +1141,33 @@ public class MainActivity extends Activity {
         editor.setText(lastText);
         internalChange = false;
 
-        liveStats.setText(computeTextStats(lastText));
-
         editor.setGravity(Gravity.TOP | Gravity.RIGHT);
         editor.setTextDirection(View.TEXT_DIRECTION_FIRST_STRONG_RTL);
         editor.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f * fontScale);
         editor.setTextColor(COLOR_TEXT_PRIMARY);
         editor.setHint("ابدأ بكتابة أفكارك هنا...");
         editor.setHintTextColor(COLOR_TEXT_SECONDARY);
-        editor.setBackgroundColor(COLOR_PAPER);
+        editor.setBackgroundColor(COLOR_CARD);
         editor.setPadding(dp(20), dp(20), dp(20), dp(36));
         editor.setLineSpacing(dp(6), 1.25f);
         applyFont(editor, false);
+
+        root.addView(editor, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+
+        // شريط الإحصائيات الحية في الأسفل كما في 2.1
+        View bottomDivider = new View(this);
+        bottomDivider.setBackgroundColor(COLOR_DIVIDER);
+        root.addView(bottomDivider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+
+        final TextView liveStats = new TextView(this);
+        liveStats.setBackgroundColor(COLOR_BG);
+        liveStats.setTextColor(COLOR_TEXT_SECONDARY);
+        liveStats.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
+        liveStats.setGravity(Gravity.CENTER);
+        liveStats.setPadding(dp(16), dp(8), dp(16), dp(8));
+        liveStats.setText(computeTextStats(lastText));
+        applyFont(liveStats, false);
+        root.addView(liveStats);
 
         if (activeHighlightQuery != null && !activeHighlightQuery.isEmpty()) {
             int matchPos = lastText.toLowerCase(Locale.ROOT).indexOf(activeHighlightQuery.toLowerCase(Locale.ROOT));
@@ -1326,8 +1202,6 @@ public class MainActivity extends Activity {
                 autoSaveHandler.postDelayed(autoSaveRunnable, 700);
             }
         });
-
-        root.addView(editor, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
     }
 
     private View createToolbarActionView(final String toolId) {
@@ -1338,12 +1212,12 @@ public class MainActivity extends Activity {
 
         if (toolbarIconsOnly) {
             FrameLayout box = new FrameLayout(this);
-            box.setBackground(roundRect(COLOR_BG, dp(10), COLOR_DIVIDER));
-            box.setPadding(dp(10), dp(7), dp(10), dp(7));
+            box.setBackground(roundRect(COLOR_CARD, dp(10), COLOR_DIVIDER));
+            box.setPadding(dp(11), dp(8), dp(11), dp(8));
             box.setLayoutParams(lp);
 
-            View icon = createVectorToolIcon(toolId, dp(22), COLOR_PRIMARY);
-            FrameLayout.LayoutParams ilp = new FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER);
+            ImageView icon = createVectorImageView(getToolIconResName(toolId), dp(20), COLOR_PRIMARY);
+            FrameLayout.LayoutParams ilp = new FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER);
             box.addView(icon, ilp);
 
             box.setOnClickListener(v -> executeTool(toolId));
@@ -1358,154 +1232,17 @@ public class MainActivity extends Activity {
             b.setAllCaps(false);
             b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
             b.setTextColor(COLOR_TEXT_PRIMARY);
-            b.setBackground(roundRect(COLOR_BG, dp(10), COLOR_DIVIDER));
-            b.setPadding(dp(12), dp(6), dp(12), dp(6));
+            b.setBackground(roundRect(COLOR_CARD, dp(10), COLOR_DIVIDER));
+            b.setPadding(dp(13), dp(7), dp(13), dp(7));
             b.setMinimumWidth(0);
             b.setMinWidth(0);
             b.setMinimumHeight(0);
             b.setMinHeight(0);
-            applyFont(b, false);
+            applyFont(b, true);
             b.setLayoutParams(lp);
             b.setOnClickListener(v -> executeTool(toolId));
             return b;
         }
-    }
-
-    // رسم الأيقونات العالمية القياسية برمجياً لكل أداة من الأدوات الـ 11
-    private View createVectorToolIcon(final String toolId, final int sizePx, final int color) {
-        return new View(this) {
-            private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-            private final Path path = new Path();
-            private final RectF rect = new RectF();
-
-            @Override
-            protected void onDraw(Canvas canvas) {
-                super.onDraw(canvas);
-                float w = getWidth();
-                float h = getHeight();
-                if (w <= 0 || h <= 0) return;
-
-                float sw = Math.max(dp(1.8f), w * 0.09f);
-                p.reset();
-                p.setAntiAlias(true);
-                p.setColor(color);
-                p.setStyle(Paint.Style.STROKE);
-                p.setStrokeWidth(sw);
-                p.setStrokeCap(Paint.Cap.ROUND);
-                p.setStrokeJoin(Paint.Join.ROUND);
-
-                if ("undo".equals(toolId)) {
-                    // سهم دائري للتراجع
-                    rect.set(w * 0.20f, h * 0.26f, w * 0.84f, h * 0.84f);
-                    canvas.drawArc(rect, 200f, 220f, false, p);
-                    path.reset();
-                    path.moveTo(w * 0.16f, h * 0.24f);
-                    path.lineTo(w * 0.18f, h * 0.48f);
-                    path.lineTo(w * 0.40f, h * 0.40f);
-                    canvas.drawPath(path, p);
-                } else if ("redo".equals(toolId)) {
-                    // سهم دائري للإعادة
-                    rect.set(w * 0.16f, h * 0.26f, w * 0.80f, h * 0.84f);
-                    canvas.drawArc(rect, -20f, -220f, false, p);
-                    path.reset();
-                    path.moveTo(w * 0.84f, h * 0.24f);
-                    path.lineTo(w * 0.82f, h * 0.48f);
-                    path.lineTo(w * 0.60f, h * 0.40f);
-                    canvas.drawPath(path, p);
-                } else if ("copy".equals(toolId)) {
-                    // ورقتان متطابقتان للنسخ
-                    rect.set(w * 0.32f, h * 0.14f, w * 0.84f, h * 0.68f);
-                    canvas.drawRoundRect(rect, dp(2.5f), dp(2.5f), p);
-
-                    p.setStyle(Paint.Style.FILL);
-                    p.setColor(COLOR_CARD);
-                    rect.set(w * 0.16f, h * 0.30f, w * 0.68f, h * 0.86f);
-                    canvas.drawRoundRect(rect, dp(2.5f), dp(2.5f), p);
-
-                    p.setStyle(Paint.Style.STROKE);
-                    p.setColor(color);
-                    canvas.drawRoundRect(rect, dp(2.5f), dp(2.5f), p);
-                    canvas.drawLine(w * 0.28f, h * 0.48f, w * 0.56f, h * 0.48f, p);
-                    canvas.drawLine(w * 0.28f, h * 0.64f, w * 0.56f, h * 0.64f, p);
-                } else if ("paste".equals(toolId)) {
-                    // حافظة اللصق (Clipboard)
-                    rect.set(w * 0.20f, h * 0.24f, w * 0.80f, h * 0.86f);
-                    canvas.drawRoundRect(rect, dp(3), dp(3), p);
-                    rect.set(w * 0.36f, h * 0.14f, w * 0.64f, h * 0.28f);
-                    p.setStyle(Paint.Style.FILL);
-                    p.setColor(COLOR_CARD);
-                    canvas.drawRoundRect(rect, dp(2), dp(2), p);
-                    p.setStyle(Paint.Style.STROKE);
-                    p.setColor(color);
-                    canvas.drawRoundRect(rect, dp(2), dp(2), p);
-                    canvas.drawLine(w * 0.34f, h * 0.48f, w * 0.66f, h * 0.48f, p);
-                    canvas.drawLine(w * 0.34f, h * 0.64f, w * 0.66f, h * 0.64f, p);
-                } else if ("cut".equals(toolId)) {
-                    // مقص القص القياسي
-                    canvas.drawCircle(w * 0.30f, h * 0.74f, w * 0.13f, p);
-                    canvas.drawCircle(w * 0.70f, h * 0.74f, w * 0.13f, p);
-                    canvas.drawLine(w * 0.38f, h * 0.64f, w * 0.76f, h * 0.18f, p);
-                    canvas.drawLine(w * 0.62f, h * 0.64f, w * 0.24f, h * 0.18f, p);
-                } else if ("select_all".equals(toolId)) {
-                    // إطار تحديد الكل مع علامة صح
-                    rect.set(w * 0.16f, h * 0.16f, w * 0.84f, h * 0.84f);
-                    canvas.drawRoundRect(rect, dp(3), dp(3), p);
-                    path.reset();
-                    path.moveTo(w * 0.32f, h * 0.52f);
-                    path.lineTo(w * 0.46f, h * 0.66f);
-                    path.lineTo(w * 0.70f, h * 0.36f);
-                    canvas.drawPath(path, p);
-                } else if ("auto_format".equals(toolId)) {
-                    // سطور مرتبة + نجمة التنسيق الآلي
-                    canvas.drawLine(w * 0.16f, h * 0.28f, w * 0.62f, h * 0.28f, p);
-                    canvas.drawLine(w * 0.16f, h * 0.52f, w * 0.54f, h * 0.52f, p);
-                    canvas.drawLine(w * 0.16f, h * 0.76f, w * 0.68f, h * 0.76f, p);
-                    // نجمة رباعية
-                    float cx = w * 0.76f;
-                    float cy = h * 0.34f;
-                    float r = w * 0.14f;
-                    canvas.drawLine(cx - r, cy, cx + r, cy, p);
-                    canvas.drawLine(cx, cy - r, cx, cy + r, p);
-                } else if ("signature".equals(toolId)) {
-                    // ريشة قلم التوقيع مع خط توقيع منحني
-                    path.reset();
-                    path.moveTo(w * 0.78f, h * 0.16f);
-                    path.lineTo(w * 0.86f, h * 0.24f);
-                    path.lineTo(w * 0.46f, h * 0.64f);
-                    path.lineTo(w * 0.30f, h * 0.68f);
-                    path.lineTo(w * 0.34f, h * 0.52f);
-                    path.close();
-                    canvas.drawPath(path, p);
-                    path.reset();
-                    path.moveTo(w * 0.18f, h * 0.84f);
-                    path.quadTo(w * 0.45f, h * 0.72f, w * 0.84f, h * 0.84f);
-                    canvas.drawPath(path, p);
-                } else if ("select_up".equals(toolId)) {
-                    // سهم التحديد لأعلى مع خط علوي
-                    canvas.drawLine(w * 0.22f, h * 0.18f, w * 0.78f, h * 0.18f, p);
-                    canvas.drawLine(w * 0.50f, h * 0.84f, w * 0.50f, h * 0.32f, p);
-                    path.reset();
-                    path.moveTo(w * 0.28f, h * 0.52f);
-                    path.lineTo(w * 0.50f, h * 0.30f);
-                    path.lineTo(w * 0.72f, h * 0.52f);
-                    canvas.drawPath(path, p);
-                } else if ("select_down".equals(toolId)) {
-                    // سهم التحديد لأسفل مع خط سفلي
-                    canvas.drawLine(w * 0.22f, h * 0.82f, w * 0.78f, h * 0.82f, p);
-                    canvas.drawLine(w * 0.50f, h * 0.16f, w * 0.50f, h * 0.68f, p);
-                    path.reset();
-                    path.moveTo(w * 0.28f, h * 0.48f);
-                    path.lineTo(w * 0.50f, h * 0.70f);
-                    path.lineTo(w * 0.72f, h * 0.48f);
-                    canvas.drawPath(path, p);
-                } else if ("datetime".equals(toolId)) {
-                    // رمز الساعة القياسي
-                    canvas.drawCircle(w * 0.50f, h * 0.50f, w * 0.34f, p);
-                    canvas.drawLine(w * 0.50f, h * 0.50f, w * 0.50f, h * 0.30f, p);
-                    canvas.drawLine(w * 0.50f, h * 0.50f, w * 0.66f, h * 0.58f, p);
-                }
-            }
-        };
     }
 
     private void executeTool(String toolId) {
@@ -1605,6 +1342,7 @@ public class MainActivity extends Activity {
             input.setHint(SIGNATURE_HINT);
             input.setTextColor(COLOR_TEXT_PRIMARY);
             input.setHintTextColor(COLOR_TEXT_SECONDARY);
+            input.setBackground(roundRect(COLOR_BG, dp(12), COLOR_DIVIDER));
             input.setPadding(dp(16), dp(14), dp(16), dp(14));
             applyFont(input, false);
 
@@ -1643,13 +1381,8 @@ public class MainActivity extends Activity {
         }
         int selEnd = Math.max(0, Math.max(editor.getSelectionStart(), editor.getSelectionEnd()));
         int anchor = Math.min(selEnd, text.length());
-        if (anchor > 0 && anchor == text.length()) {
-            anchor = text.length();
-        }
         int paraEnd = text.indexOf('\n', anchor);
-        if (paraEnd == -1) {
-            paraEnd = text.length();
-        }
+        if (paraEnd == -1) paraEnd = text.length();
         editor.requestFocus();
         editor.setSelection(0, paraEnd);
         toast("تم تحديد الفقرة الحالية وما فوقها");
@@ -1762,14 +1495,13 @@ public class MainActivity extends Activity {
         sizeTitle.setTextColor(COLOR_TEXT_PRIMARY);
         sizeTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         sizeTitle.setGravity(Gravity.RIGHT);
-        sizeTitle.setIncludeFontPadding(true);
-        sizeTitle.setPadding(0, dp(2), 0, dp(2));
+        sizeTitle.setPadding(0, dp(2), 0, dp(4));
         applyFont(sizeTitle, true);
 
         SeekBar seek = new SeekBar(this);
         seek.setMax(140); // 60% .. 200%
         seek.setProgress(Math.round((fontScale - 0.6f) * 100));
-        seek.setPadding(0, dp(8), 0, dp(16));
+        seek.setPadding(0, dp(6), 0, dp(16));
         seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
@@ -1782,13 +1514,12 @@ public class MainActivity extends Activity {
             public void onStopTrackingTouch(SeekBar seekBar) {}
         });
 
-        // 2. نوع الخط (مع حل مشكلة الخط الأميري)
+        // 2. نوع الخط (بدون صندوق المعاينة الزائد، ومع حل مشكلة الخط الأميري)
         TextView fontTitle = new TextView(this);
-        fontTitle.setText("نوع الخط المستخدم (اضغط للمعاينة)");
+        fontTitle.setText("نوع الخط المستخدم");
         fontTitle.setTextColor(COLOR_TEXT_PRIMARY);
         fontTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         fontTitle.setGravity(Gravity.RIGHT);
-        fontTitle.setIncludeFontPadding(true);
         fontTitle.setPadding(0, dp(4), 0, dp(6));
         applyFont(fontTitle, true);
 
@@ -1808,30 +1539,10 @@ public class MainActivity extends Activity {
         fontSpinner.setSelection(fontChoice);
         fontSpinner.setBackground(roundRect(COLOR_BG, dp(12), COLOR_DIVIDER));
         fontSpinner.setPadding(dp(8), dp(4), dp(8), dp(4));
-
-        final TextView previewBox = new TextView(this);
-        previewBox.setText("بسم الله الرحمن الرحيم — مفكرة أ. شفيقة مزود");
-        previewBox.setTextColor(COLOR_TEXT_PRIMARY);
-        previewBox.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
-        previewBox.setGravity(Gravity.CENTER);
-        previewBox.setIncludeFontPadding(true);
-        previewBox.setBackground(roundRect(COLOR_PAPER, dp(12), COLOR_DIVIDER));
-        previewBox.setPadding(dp(12), dp(14), dp(12), dp(14));
-        LinearLayout.LayoutParams prevLp = new LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams fontSpinLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        prevLp.topMargin = dp(8);
-        prevLp.bottomMargin = dp(14);
-        previewBox.setLayoutParams(prevLp);
-        previewBox.setTypeface(getFontByIndex(fontChoice, false));
-
-        fontSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                previewBox.setTypeface(getFontByIndex(position, false));
-            }
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {}
-        });
+        fontSpinLp.bottomMargin = dp(14);
+        fontSpinner.setLayoutParams(fontSpinLp);
 
         // 3. ثيم الألوان
         TextView themeTitle = new TextView(this);
@@ -1849,7 +1560,7 @@ public class MainActivity extends Activity {
                 View v = super.getView(position, convertView, parent);
                 if (v instanceof TextView) {
                     TextView tv = (TextView) v;
-                    tv.setTextColor( THEME_COLORS[position][0]);
+                    tv.setTextColor(THEME_COLORS[position][0]);
                     tv.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
                     applyFont(tv, true);
                 }
@@ -1875,7 +1586,7 @@ public class MainActivity extends Activity {
         themeSpinner.setBackground(roundRect(COLOR_BG, dp(12), COLOR_DIVIDER));
         themeSpinner.setPadding(dp(8), dp(6), dp(8), dp(6));
 
-        // 4. شريط أدوات التحرير + شكل الأزرار (رموز / نصوص) + التخصيص والترتيب بالسحب
+        // 4. شريط أدوات التحرير + شكل العرض (نصوص / رموز) + التخصيص
         LinearLayout toolbarSwitchRow = new LinearLayout(this);
         toolbarSwitchRow.setOrientation(LinearLayout.HORIZONTAL);
         toolbarSwitchRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -1895,48 +1606,70 @@ public class MainActivity extends Activity {
         toolbarSwitchRow.addView(toolbarLabel);
         toolbarSwitchRow.addView(toolbarSwitch);
 
-        // خيار التبديل بين (نصوص) و (رموز) في شاشة الكتابة
-        TextView modeLabel = new TextView(this);
-        modeLabel.setText("شكل أدوات التحرير في شاشة الكتابة:");
-        modeLabel.setTextColor(COLOR_TEXT_SECONDARY);
-        modeLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        modeLabel.setGravity(Gravity.RIGHT);
-        modeLabel.setPadding(0, dp(4), 0, dp(4));
-        applyFont(modeLabel, false);
+        // أزرار تبديل أنيقة بين (نصوص) و (رموز)
+        final boolean[] tempIconsOnly = {toolbarIconsOnly};
+        LinearLayout styleToggleRow = new LinearLayout(this);
+        styleToggleRow.setOrientation(LinearLayout.HORIZONTAL);
+        styleToggleRow.setBackground(roundRect(COLOR_BG, dp(12), COLOR_DIVIDER));
+        styleToggleRow.setPadding(dp(4), dp(4), dp(4), dp(4));
+        LinearLayout.LayoutParams stLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        stLp.bottomMargin = dp(10);
+        styleToggleRow.setLayoutParams(stLp);
 
-        final RadioGroup displayModeGroup = new RadioGroup(this);
-        displayModeGroup.setOrientation(RadioGroup.HORIZONTAL);
-        displayModeGroup.setGravity(Gravity.RIGHT);
-        displayModeGroup.setPadding(0, 0, 0, dp(8));
+        final TextView tabTexts = new TextView(this);
+        tabTexts.setText("عرض كنصوص (قص، نسخ)");
+        tabTexts.setGravity(Gravity.CENTER);
+        tabTexts.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        tabTexts.setPadding(dp(8), dp(9), dp(8), dp(9));
+        tabTexts.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
-        final RadioButton rbText = new RadioButton(this);
-        rbText.setText("نصوص (مثل: قص، نسخ)");
-        rbText.setTextColor(COLOR_TEXT_PRIMARY);
-        rbText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        applyFont(rbText, false);
+        final TextView tabIcons = new TextView(this);
+        tabIcons.setText("عرض كرموز (أيقونات)");
+        tabIcons.setGravity(Gravity.CENTER);
+        tabIcons.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        tabIcons.setPadding(dp(8), dp(9), dp(8), dp(9));
+        tabIcons.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
-        final RadioButton rbIcons = new RadioButton(this);
-        rbIcons.setText("رموز عالمية (أيقونات)");
-        rbIcons.setTextColor(COLOR_TEXT_PRIMARY);
-        rbIcons.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        applyFont(rbIcons, false);
+        final Runnable updateStyleTabs = () -> {
+            if (!tempIconsOnly[0]) {
+                tabTexts.setBackground(roundRect(COLOR_PRIMARY, dp(9), COLOR_PRIMARY));
+                tabTexts.setTextColor(Color.WHITE);
+                applyFont(tabTexts, true);
+                tabIcons.setBackgroundColor(Color.TRANSPARENT);
+                tabIcons.setTextColor(COLOR_TEXT_SECONDARY);
+                applyFont(tabIcons, false);
+            } else {
+                tabIcons.setBackground(roundRect(COLOR_PRIMARY, dp(9), COLOR_PRIMARY));
+                tabIcons.setTextColor(Color.WHITE);
+                applyFont(tabIcons, true);
+                tabTexts.setBackgroundColor(Color.TRANSPARENT);
+                tabTexts.setTextColor(COLOR_TEXT_SECONDARY);
+                applyFont(tabTexts, false);
+            }
+        };
+        updateStyleTabs.run();
 
-        displayModeGroup.addView(rbText);
-        displayModeGroup.addView(rbIcons);
-        if (toolbarIconsOnly) {
-            rbIcons.setChecked(true);
-        } else {
-            rbText.setChecked(true);
-        }
+        tabTexts.setOnClickListener(v -> {
+            tempIconsOnly[0] = false;
+            updateStyleTabs.run();
+        });
+        tabIcons.setOnClickListener(v -> {
+            tempIconsOnly[0] = true;
+            updateStyleTabs.run();
+        });
 
-        Button customizeToolsBtn = createSecondaryButton("🛠 تخصيص وترتيب أدوات التحرير (سحب وإفلات)",
+        styleToggleRow.addView(tabTexts);
+        styleToggleRow.addView(tabIcons);
+
+        Button customizeToolsBtn = createSecondaryButton("🛠 تخصيص وترتيب أدوات التحرير",
                 this::showToolbarCustomizationDialog);
         LinearLayout.LayoutParams custLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         custLp.bottomMargin = dp(14);
         customizeToolsBtn.setLayoutParams(custLp);
 
-        // 5. التوقيع الشخصي (مع المثال الإرشادي من سطرين عند مسحه)
+        // 5. التوقيع الشخصي
         TextView sigTitle = new TextView(this);
         sigTitle.setText("التوقيع الشخصي (يُدرج بزر التوقيع)");
         sigTitle.setTextColor(COLOR_TEXT_PRIMARY);
@@ -1962,20 +1695,18 @@ public class MainActivity extends Activity {
         Button changeFolderBtn = createSecondaryButton("📁 تغيير مجلد حفظ الملفات", null);
         LinearLayout.LayoutParams folderLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        folderLp.topMargin = dp(18);
-        folderLp.bottomMargin = dp(8);
+        folderLp.topMargin = dp(16);
+        folderLp.bottomMargin = dp(6);
         changeFolderBtn.setLayoutParams(folderLp);
 
         box.addView(sizeTitle);
         box.addView(seek);
         box.addView(fontTitle);
         box.addView(fontSpinner);
-        box.addView(previewBox);
         box.addView(themeTitle);
         box.addView(themeSpinner);
         box.addView(toolbarSwitchRow);
-        box.addView(modeLabel);
-        box.addView(displayModeGroup);
+        box.addView(styleToggleRow);
         box.addView(customizeToolsBtn);
         box.addView(sigTitle);
         box.addView(sigInput);
@@ -2017,7 +1748,7 @@ public class MainActivity extends Activity {
             fontChoice = fontSpinner.getSelectedItemPosition();
             themeChoice = themeSpinner.getSelectedItemPosition();
             showToolbar = toolbarSwitch.isChecked();
-            toolbarIconsOnly = rbIcons.isChecked();
+            toolbarIconsOnly = tempIconsOnly[0];
             signatureText = sigInput.getText().toString().trim();
 
             prefs.edit()
@@ -2027,7 +1758,7 @@ public class MainActivity extends Activity {
                     .putBoolean("show_toolbar", showToolbar)
                     .putBoolean("toolbar_icons_only", toolbarIconsOnly)
                     .putString("custom_signature", signatureText)
-                    .putBoolean("signature_initialized_v2", true)
+                    .putBoolean("sig_init_v3", true)
                     .apply();
 
             applyThemeColors();
@@ -2049,22 +1780,20 @@ public class MainActivity extends Activity {
         tv.setSingleLine(false);
         tv.setMaxLines(2);
         tv.setIncludeFontPadding(true);
-        // الخط الأميري يحتاج ارتفاع سطر مريح وحجم متوازن حتى لا ينقص منه أي حرف
         float size = (position == 2) ? 16.5f : 17.0f;
         tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, size);
         tv.setTypeface(getFontByIndex(position, false));
         int vPad = isDropDown ? dp(14) : dp(10);
         tv.setPadding(dp(14), vPad, dp(14), vPad);
-        AbsListView.LayoutParams lp = new AbsListView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        tv.setLayoutParams(lp);
+        tv.setLayoutParams(new AbsListView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         if (isDropDown) {
             tv.setBackgroundColor(Color.WHITE);
         }
         return tv;
     }
 
-    // نافذة تخصيص وترتيب الأدوات باللمس والسحب (Drag & Drop)
+    // نافذة تخصيص وترتيب الأدوات بنظام سحب وإفلات مستقر 100% ومظهر أنيق
     private void showToolbarCustomizationDialog() {
         AlertDialog.Builder b = new AlertDialog.Builder(this);
         b.setCustomTitle(createDialogTitleView("🛠 تخصيص وترتيب أدوات التحرير", false));
@@ -2075,35 +1804,36 @@ public class MainActivity extends Activity {
         outer.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
 
         TextView hint = new TextView(this);
-        hint.setText("اسحب أي أداة من علامة (☰) للأعلى أو الأسفل لتغيير ترتيب ظهورها في شريط الكتابة:");
+        hint.setText("اسحب أي أداة من مقبض (☰) لإعادة ترتيبها، وستظهر في شريط الكتابة من اليمين لليسار بنفس هذا الترتيب:");
         hint.setTextColor(COLOR_TEXT_SECONDARY);
-        hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
         hint.setGravity(Gravity.RIGHT);
-        hint.setPadding(dp(4), 0, dp(4), dp(8));
+        hint.setPadding(dp(4), 0, dp(4), dp(10));
         applyFont(hint, false);
         outer.addView(hint);
 
         final List<String> tempOrder = new ArrayList<>(orderedToolIds);
         final Set<String> tempEnabled = new HashSet<>(enabledToolIds);
         final Map<String, CheckBox> checkBoxesMap = new HashMap<>();
+        final boolean[] internalSync = {false};
 
-        // صف التحكم السريع (تحديد الكل + استعادة الافتراضي)
+        // شريط علوي أنيق: تحديد الكل + استعادة الافتراضي
         LinearLayout topControls = new LinearLayout(this);
         topControls.setOrientation(LinearLayout.HORIZONTAL);
         topControls.setGravity(Gravity.CENTER_VERTICAL);
-        topControls.setBackground(roundRect(COLOR_ACCENT_SOFT, dp(10), COLOR_DIVIDER));
-        topControls.setPadding(dp(10), dp(6), dp(10), dp(6));
+        topControls.setBackground(roundRect(COLOR_ACCENT_SOFT, dp(12), COLOR_DIVIDER));
+        topControls.setPadding(dp(12), dp(6), dp(10), dp(6));
 
         final CheckBox allCheck = new CheckBox(this);
-        allCheck.setText("تحديد الكل");
+        allCheck.setText("تحديد / إلغاء تحديد الكل");
         allCheck.setTextColor(COLOR_PRIMARY_DARK);
-        allCheck.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        allCheck.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
         allCheck.setChecked(tempEnabled.size() == TOOL_IDS.length);
         allCheck.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         applyFont(allCheck, true);
 
         Button resetDefaultBtn = createSecondaryButton("↺ الافتراضي", null);
-        resetDefaultBtn.setPadding(dp(10), dp(4), dp(10), dp(4));
+        resetDefaultBtn.setPadding(dp(12), dp(4), dp(12), dp(4));
 
         topControls.addView(allCheck);
         topControls.addView(resetDefaultBtn);
@@ -2116,57 +1846,62 @@ public class MainActivity extends Activity {
         final ScrollView scroll = new ScrollView(this);
         final LinearLayout listContainer = new LinearLayout(this);
         listContainer.setOrientation(LinearLayout.VERTICAL);
+        listContainer.setPadding(0, dp(2), 0, dp(6));
         scroll.addView(listContainer);
 
-        final boolean[] internalSync = {false};
+        final int rowHeightPx = dp(52);
+        final int rowMarginPx = dp(7);
+        final int slotPx = rowHeightPx + rowMarginPx;
 
-        final Runnable rebuildRows = new Runnable() {
+        final Runnable buildList = new Runnable() {
             @Override
             public void run() {
                 listContainer.removeAllViews();
                 checkBoxesMap.clear();
 
-                for (final String toolId : tempOrder) {
+                for (int i = 0; i < tempOrder.size(); i++) {
+                    final String toolId = tempOrder.get(i);
+
                     final LinearLayout row = new LinearLayout(MainActivity.this);
                     row.setOrientation(LinearLayout.HORIZONTAL);
                     row.setGravity(Gravity.CENTER_VERTICAL);
                     row.setBackground(roundRect(COLOR_CARD, dp(12), COLOR_DIVIDER));
-                    row.setPadding(dp(10), dp(8), dp(10), dp(8));
-                    row.setTag(toolId);
+                    row.setPadding(dp(10), 0, dp(10), 0);
 
                     LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                    rlp.bottomMargin = dp(6);
+                            ViewGroup.LayoutParams.MATCH_PARENT, rowHeightPx);
+                    rlp.bottomMargin = rowMarginPx;
                     row.setLayoutParams(rlp);
 
-                    // مقبض السحب (☰)
-                    TextView dragHandle = new TextView(MainActivity.this);
-                    dragHandle.setText("☰");
-                    dragHandle.setTextColor(COLOR_TEXT_SECONDARY);
-                    dragHandle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-                    dragHandle.setGravity(Gravity.CENTER);
-                    dragHandle.setPadding(dp(10), dp(4), dp(10), dp(4));
+                    // مقبض السحب الفيكتور (☰)
+                    FrameLayout handleBox = new FrameLayout(MainActivity.this);
+                    handleBox.setPadding(dp(10), dp(10), dp(10), dp(10));
+                    ImageView handleIcon = createVectorImageView("ic_drag_handle", dp(20), COLOR_TEXT_SECONDARY);
+                    handleBox.addView(handleIcon, new FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER));
 
-                    // مربع الاختيار
-                    final CheckBox cb = new CheckBox(MainActivity.this);
-                    cb.setChecked(tempEnabled.contains(toolId));
-                    checkBoxesMap.put(toolId, cb);
-
-                    // الأيقونة القياسية بجانب النص في الإعدادات
-                    View iconView = createVectorToolIcon(toolId, dp(22), COLOR_PRIMARY);
-                    LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(24), dp(24));
-                    ilp.rightMargin = dp(6);
-                    ilp.leftMargin = dp(10);
-                    iconView.setLayoutParams(ilp);
+                    // الأيقونة الفيكتور للأداة داخل مربع ناعم
+                    FrameLayout iconBadge = new FrameLayout(MainActivity.this);
+                    iconBadge.setBackground(roundRect(COLOR_ACCENT_SOFT, dp(9), COLOR_ACCENT_SOFT));
+                    ImageView toolIcon = createVectorImageView(getToolIconResName(toolId), dp(19), COLOR_PRIMARY);
+                    iconBadge.addView(toolIcon, new FrameLayout.LayoutParams(dp(19), dp(19), Gravity.CENTER));
+                    LinearLayout.LayoutParams ibLp = new LinearLayout.LayoutParams(dp(34), dp(34));
+                    ibLp.rightMargin = dp(4);
+                    ibLp.leftMargin = dp(10);
+                    iconBadge.setLayoutParams(ibLp);
 
                     // اسم الأداة
                     TextView labelTv = new TextView(MainActivity.this);
                     labelTv.setText(getToolLabel(toolId));
                     labelTv.setTextColor(COLOR_TEXT_PRIMARY);
-                    labelTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+                    labelTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);
                     labelTv.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
                     labelTv.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-                    applyFont(labelTv, false);
+                    applyFont(labelTv, true);
+
+                    // مربع التفعيل
+                    final CheckBox cb = new CheckBox(MainActivity.this);
+                    cb.setChecked(tempEnabled.contains(toolId));
+                    checkBoxesMap.put(toolId, cb);
 
                     cb.setOnCheckedChangeListener((buttonView, isChecked) -> {
                         if (internalSync[0]) return;
@@ -2180,75 +1915,87 @@ public class MainActivity extends Activity {
 
                     row.setOnClickListener(v -> cb.setChecked(!cb.isChecked()));
 
-                    // تفعيل السحب والإفلات المباشر باللمس (Touch Drag & Drop)
-                    dragHandle.setOnTouchListener(new View.OnTouchListener() {
-                        float lastRawY = 0f;
+                    // خوارزمية السحب السلسة: لا تحذف أي عنصر أثناء اللمس، بل تحرك السطور بانسيابية وتثبت الترتيب عند رفع الإصبع
+                    handleBox.setOnTouchListener(new View.OnTouchListener() {
+                        float startRawY = 0f;
+                        int startIndex = -1;
+                        int currentTargetIndex = -1;
 
                         @Override
                         public boolean onTouch(View v, MotionEvent event) {
                             int action = event.getActionMasked();
                             if (action == MotionEvent.ACTION_DOWN) {
-                                lastRawY = event.getRawY();
+                                startIndex = listContainer.indexOfChild(row);
+                                if (startIndex < 0) return false;
+                                currentTargetIndex = startIndex;
+                                startRawY = event.getRawY();
                                 scroll.requestDisallowInterceptTouchEvent(true);
+                                row.bringToFront();
                                 row.setBackground(roundRect(COLOR_ACCENT_SOFT, dp(12), COLOR_PRIMARY));
                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                                    row.setElevation(dp(6));
+                                    row.setElevation(dp(8));
                                 }
                                 return true;
                             } else if (action == MotionEvent.ACTION_MOVE) {
-                                float dy = event.getRawY() - lastRawY;
-                                row.setTranslationY(row.getTranslationY() + dy);
-                                lastRawY = event.getRawY();
+                                if (startIndex < 0) return false;
+                                int count = listContainer.getChildCount();
+                                float dy = event.getRawY() - startRawY;
+                                float minDy = -startIndex * slotPx;
+                                float maxDy = (count - 1 - startIndex) * slotPx;
+                                if (dy < minDy) dy = minDy;
+                                if (dy > maxDy) dy = maxDy;
 
-                                int currentIdx = listContainer.indexOfChild(row);
-                                float currentCenter = row.getTop() + row.getTranslationY() + (row.getHeight() / 2f);
+                                row.setTranslationY(dy);
 
-                                if (currentIdx > 0) {
-                                    View above = listContainer.getChildAt(currentIdx - 1);
-                                    float aboveMid = above.getTop() + (above.getHeight() / 2f);
-                                    if (currentCenter < aboveMid) {
-                                        int step = above.getHeight() + dp(6);
-                                        listContainer.removeViewAt(currentIdx);
-                                        listContainer.addView(row, currentIdx - 1);
-                                        Collections.swap(tempOrder, currentIdx, currentIdx - 1);
-                                        row.setTranslationY(row.getTranslationY() + step);
+                                int newTarget = Math.round(startIndex + (dy / slotPx));
+                                if (newTarget < 0) newTarget = 0;
+                                if (newTarget >= count) newTarget = count - 1;
+                                currentTargetIndex = newTarget;
+
+                                for (int idx = 0; idx < count; idx++) {
+                                    if (idx == startIndex) continue;
+                                    View child = listContainer.getChildAt(idx);
+                                    float targetTrans = 0f;
+                                    if (startIndex < currentTargetIndex && idx > startIndex && idx <= currentTargetIndex) {
+                                        targetTrans = -slotPx;
+                                    } else if (startIndex > currentTargetIndex && idx < startIndex && idx >= currentTargetIndex) {
+                                        targetTrans = slotPx;
                                     }
-                                }
-                                if (currentIdx < listContainer.getChildCount() - 1) {
-                                    View below = listContainer.getChildAt(currentIdx + 1);
-                                    float belowMid = below.getTop() + (below.getHeight() / 2f);
-                                    if (currentCenter > belowMid) {
-                                        int step = below.getHeight() + dp(6);
-                                        listContainer.removeViewAt(currentIdx);
-                                        listContainer.addView(row, currentIdx + 1);
-                                        Collections.swap(tempOrder, currentIdx, currentIdx + 1);
-                                        row.setTranslationY(row.getTranslationY() - step);
-                                    }
+                                    child.setTranslationY(targetTrans);
                                 }
                                 return true;
                             } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                                row.setTranslationY(0f);
+                                scroll.requestDisallowInterceptTouchEvent(false);
+                                int count = listContainer.getChildCount();
+                                for (int idx = 0; idx < count; idx++) {
+                                    listContainer.getChildAt(idx).setTranslationY(0f);
+                                }
                                 row.setBackground(roundRect(COLOR_CARD, dp(12), COLOR_DIVIDER));
                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                                     row.setElevation(0f);
                                 }
-                                scroll.requestDisallowInterceptTouchEvent(false);
+                                if (startIndex >= 0 && currentTargetIndex >= 0 && startIndex != currentTargetIndex) {
+                                    String moved = tempOrder.remove(startIndex);
+                                    tempOrder.add(currentTargetIndex, moved);
+                                    buildList.run();
+                                }
+                                startIndex = -1;
                                 return true;
                             }
                             return false;
                         }
                     });
 
-                    row.addView(dragHandle);
-                    row.addView(cb);
-                    row.addView(iconView);
+                    row.addView(handleBox);
+                    row.addView(iconBadge);
                     row.addView(labelTv);
+                    row.addView(cb);
                     listContainer.addView(row);
                 }
             }
         };
 
-        rebuildRows.run();
+        buildList.run();
 
         allCheck.setOnClickListener(v -> {
             boolean selectAll = (tempEnabled.size() < TOOL_IDS.length);
@@ -2258,8 +2005,8 @@ public class MainActivity extends Activity {
                 tempEnabled.addAll(Arrays.asList(TOOL_IDS));
             }
             allCheck.setChecked(selectAll);
-            for (Map.Entry<String, CheckBox> entry : checkBoxesMap.entrySet()) {
-                entry.getValue().setChecked(selectAll);
+            for (CheckBox cb : checkBoxesMap.values()) {
+                cb.setChecked(selectAll);
             }
             internalSync[0] = false;
         });
@@ -2272,38 +2019,47 @@ public class MainActivity extends Activity {
             internalSync[0] = true;
             allCheck.setChecked(false);
             internalSync[0] = false;
-            rebuildRows.run();
-            toast("تمت استعادة الأدوات والترتيب الافتراضي");
+            buildList.run();
+            toast("تمت استعادة الترتيب والأدوات الافتراضية");
         });
 
         LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(340));
         outer.addView(scroll, scrollLp);
 
+        LinearLayout actionsRow = new LinearLayout(this);
+        actionsRow.setOrientation(LinearLayout.HORIZONTAL);
+        actionsRow.setGravity(Gravity.CENTER_VERTICAL);
+        actionsRow.setPadding(0, dp(12), 0, dp(2));
+
+        Button saveOrderBtn = createPrimaryButton("حفظ الترتيب", null);
+        LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.3f);
+        sLp.leftMargin = dp(8);
+        saveOrderBtn.setLayoutParams(sLp);
+
+        Button cancelOrderBtn = createSecondaryButton("إلغاء", null);
+        LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.9f);
+        cancelOrderBtn.setLayoutParams(cLp);
+
+        actionsRow.addView(saveOrderBtn);
+        actionsRow.addView(cancelOrderBtn);
+        outer.addView(actionsRow);
+
         b.setView(outer);
-        b.setPositiveButton("اعتماد الترتيب والأدوات", (d, w) -> {
+        final AlertDialog dialog = b.create();
+
+        cancelOrderBtn.setOnClickListener(v -> dialog.dismiss());
+        saveOrderBtn.setOnClickListener(v -> {
             orderedToolIds.clear();
             orderedToolIds.addAll(tempOrder);
             enabledToolIds.clear();
             enabledToolIds.addAll(tempEnabled);
             saveToolsConfig();
+            dialog.dismiss();
             toast("تم حفظ ترتيب وأدوات التحرير ✓");
         });
-        b.setNegativeButton("إلغاء", null);
-        b.show();
-    }
 
-    private void showAboutDialog() {
-        AlertDialog.Builder b = new AlertDialog.Builder(this);
-        b.setCustomTitle(createDialogTitleView("ℹ عن مفكرة مزود", false));
-        b.setMessage("مفكرة أ. شفيقة مزود (الإصدار 2.2)\n" +
-                "كاتبة وباحثة في التراث الحضرمي\n\n" +
-                "تطبيق عربي أصيل مصمم لتدوين الأبحاث والمقالات وحفظها كملفات نصية (TXT) مباشرة داخل جهازك.\n\n" +
-                "• بحث شامل في عناوين ومحتوى المستندات مع القفز للموضع.\n" +
-                "• شريط أدوات قابل لإعادة الترتيب بالسحب مع دعم الرموز والنصوص.\n" +
-                "• حفظ تلقائي فوري ونسخ احتياطي بصيغة ZIP.");
-        b.setPositiveButton("حسناً", null);
-        b.show();
+        dialog.show();
     }
 
     private void createNewFileDialog() {
@@ -2683,22 +2439,9 @@ public class MainActivity extends Activity {
         b.setText(text);
         b.setAllCaps(false);
         b.setTextColor(COLOR_TEXT_PRIMARY);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
         b.setBackground(roundRect(COLOR_CARD, dp(12), COLOR_DIVIDER));
         b.setPadding(dp(14), dp(9), dp(14), dp(9));
-        applyFont(b, false);
-        if (onClick != null) b.setOnClickListener(v -> onClick.run());
-        return b;
-    }
-
-    private Button createBottomNavButton(String text, Runnable onClick) {
-        Button b = new Button(this);
-        b.setText(text);
-        b.setAllCaps(false);
-        b.setTextColor(COLOR_PRIMARY_DARK);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        b.setBackground(roundRect(COLOR_BG, dp(12), COLOR_DIVIDER));
-        b.setPadding(dp(8), dp(10), dp(8), dp(10));
         applyFont(b, true);
         if (onClick != null) b.setOnClickListener(v -> onClick.run());
         return b;
@@ -2716,7 +2459,7 @@ public class MainActivity extends Activity {
         GradientDrawable gd = new GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
                 new int[]{COLOR_PRIMARY, COLOR_PRIMARY_DARK});
-        gd.setCornerRadii(new float[]{0, 0, 0, 0, dp(24), dp(24), dp(24), dp(24)});
+        gd.setCornerRadii(new float[]{0, 0, 0, 0, dp(26), dp(26), dp(26), dp(26)});
         return gd;
     }
 
