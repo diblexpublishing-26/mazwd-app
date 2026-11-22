@@ -118,7 +118,7 @@ public class MainActivity extends Activity {
     private static final String[] FONT_NAMES = new String[]{
             "Sans — خط واضح وعصري (افتراضي)",
             "تجوال — خط حديث وأنيق للمقالات",
-            "النسخ الأصيل — خط نسخ كلاسيكي متوازن",
+            "المراعي — خط عربي كلاسيكي مريح ومتوازن",
             "عارف رقعة — خط الرقعة العربي",
             "ريم كوفي — خط كوفي حديث ومميز",
             "Serif — خط إنجليزي رسمي ومريح",
@@ -202,8 +202,8 @@ public class MainActivity extends Activity {
     private int currentFontIndex = 0;
     private int currentZoomPercent = 100;
 
-    private Typeface fontNaskhReg;
-    private Typeface fontNaskhBold;
+    private Typeface fontAlmaraiReg;
+    private Typeface fontAlmaraiBold;
     private Typeface fontRuqaaReg;
     private Typeface fontRuqaaBold;
     private Typeface fontTajawalReg;
@@ -238,41 +238,76 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        requestWindowFeature(Window.FEATURE_NO_TITLE);
-
-        prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        if (!prefs.getBoolean(KEY_SIGNATURE_INITIALIZED, false)) {
-            prefs.edit()
-                    .putString(KEY_SIGNATURE, DEFAULT_SIGNATURE)
-                    .putBoolean(KEY_SIGNATURE_INITIALIZED, true)
-                    .apply();
+        try {
+            requestWindowFeature(Window.FEATURE_NO_TITLE);
+        } catch (Throwable ignored) {
         }
+        super.onCreate(savedInstanceState);
 
-        int themeIdx = prefs.getInt(KEY_THEME_INDEX, 0);
-        if (themeIdx < 0 || themeIdx >= THEMES.length) themeIdx = 0;
-        currentTheme = THEMES[themeIdx];
+        try {
+            prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            if (!prefs.getBoolean(KEY_SIGNATURE_INITIALIZED, false)) {
+                prefs.edit()
+                        .putString(KEY_SIGNATURE, DEFAULT_SIGNATURE)
+                        .putBoolean(KEY_SIGNATURE_INITIALIZED, true)
+                        .apply();
+            }
 
-        currentFontIndex = prefs.getInt(KEY_FONT_INDEX, 0);
-        if (currentFontIndex < 0 || currentFontIndex >= FONT_NAMES.length) currentFontIndex = 0;
+            int themeIdx = prefs.getInt(KEY_THEME_INDEX, 0);
+            if (themeIdx < 0 || themeIdx >= THEMES.length) themeIdx = 0;
+            currentTheme = THEMES[themeIdx];
 
-        currentZoomPercent = prefs.getInt(KEY_ZOOM_PERCENT, 100);
-        if (currentZoomPercent < 60 || currentZoomPercent > 220) currentZoomPercent = 100;
+            currentFontIndex = prefs.getInt(KEY_FONT_INDEX, 0);
+            if (currentFontIndex < 0 || currentFontIndex >= FONT_NAMES.length) currentFontIndex = 0;
 
-        loadCustomFonts();
+            currentZoomPercent = prefs.getInt(KEY_ZOOM_PERCENT, 100);
+            if (currentZoomPercent < 60 || currentZoomPercent > 220) currentZoomPercent = 100;
 
-        rootContainer = new FrameLayout(this);
-        rootContainer.setBackgroundColor(COLOR_BG_MAIN);
-        setContentView(rootContainer);
+            loadCustomFonts();
 
-        applyStatusBarTheme();
-        renderCurrentScreen();
-        refreshFileList();
+            rootContainer = new FrameLayout(this);
+            rootContainer.setBackgroundColor(COLOR_BG_MAIN);
+            setContentView(rootContainer);
+
+            applyStatusBarTheme();
+            renderCurrentScreen();
+            refreshFileList();
+        } catch (Throwable t) {
+            showRecoveryScreen(t);
+        }
+    }
+
+    private void showRecoveryScreen(Throwable t) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER);
+        box.setPadding(dp(24), dp(24), dp(24), dp(24));
+        box.setBackgroundColor(COLOR_BG_MAIN);
+
+        TextView msg = new TextView(this);
+        msg.setText("حدث خطأ غير متوقع أثناء التشغيل:\n" + t.toString());
+        msg.setTextColor(COLOR_TEXT_DARK);
+        msg.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        msg.setGravity(Gravity.CENTER);
+        box.addView(msg);
+
+        Button resetBtn = new Button(this);
+        resetBtn.setText("إعادة ضبط الإعدادات وفتح التطبيق");
+        resetBtn.setOnClickListener(v -> {
+            if (prefs != null) prefs.edit().clear().apply();
+            recreate();
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(48));
+        lp.topMargin = dp(20);
+        box.addView(resetBtn, lp);
+
+        setContentView(box);
     }
 
     private void loadCustomFonts() {
-        fontNaskhReg = loadResFont("mazwd_arabic", Typeface.SERIF, Typeface.NORMAL);
-        fontNaskhBold = loadResFont("mazwd_arabic_bold", Typeface.SERIF, Typeface.BOLD);
+        fontAlmaraiReg = loadResFont("mazwd_arabic", Typeface.SANS_SERIF, Typeface.NORMAL);
+        fontAlmaraiBold = loadResFont("mazwd_arabic_bold", Typeface.SANS_SERIF, Typeface.BOLD);
         fontRuqaaReg = loadResFont("aref_ruqaa", Typeface.SERIF, Typeface.NORMAL);
         fontRuqaaBold = loadResFont("aref_ruqaa_bold", Typeface.SERIF, Typeface.BOLD);
         fontTajawalReg = loadResFont("tajawal_regular", Typeface.SANS_SERIF, Typeface.NORMAL);
@@ -290,7 +325,7 @@ public class MainActivity extends Activity {
                     if (tf != null) return tf;
                 }
             }
-        } catch (Exception ignored) {
+        } catch (Throwable ignored) {
         }
         return Typeface.create(fallbackFamily, style);
     }
@@ -301,7 +336,7 @@ public class MainActivity extends Activity {
             case 1:
                 return isBold ? fontTajawalBold : fontTajawalReg;
             case 2:
-                return isBold ? fontNaskhBold : fontNaskhReg;
+                return isBold ? fontAlmaraiBold : fontAlmaraiReg;
             case 3:
                 return isBold ? fontRuqaaBold : fontRuqaaReg;
             case 4:
@@ -317,19 +352,26 @@ public class MainActivity extends Activity {
     }
 
     private Typeface getAppTypeface(int style) {
-        return getFontTypefaceForIndex(currentFontIndex, style);
+        Typeface tf = getFontTypefaceForIndex(currentFontIndex, style);
+        return tf != null ? tf : Typeface.create(Typeface.SANS_SERIF, style);
     }
 
     private void applyStatusBarTheme() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            Window window = getWindow();
-            window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-            window.setStatusBarColor(currentTheme.primaryDark);
-            window.setNavigationBarColor(COLOR_CARD_BG);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                Window window = getWindow();
+                if (window != null) {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+                    window.setStatusBarColor(currentTheme.primaryDark);
+                    window.setNavigationBarColor(COLOR_CARD_BG);
+                }
+            }
+        } catch (Throwable ignored) {
         }
     }
 
     private void renderCurrentScreen() {
+        if (rootContainer == null) return;
         rootContainer.removeAllViews();
         if (currentScreen == ScreenState.HOME) {
             rootContainer.addView(buildHomeScreen());
@@ -348,7 +390,7 @@ public class MainActivity extends Activity {
         mainLayout.setBackgroundColor(COLOR_BG_MAIN);
         mainLayout.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
 
-        // 1. Modern Rounded Hero Card (No logo inside, balanced height across all fonts)
+        // 1. Modern Rounded Hero Card
         LinearLayout heroCard = new LinearLayout(this);
         heroCard.setOrientation(LinearLayout.VERTICAL);
         heroCard.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -545,46 +587,49 @@ public class MainActivity extends Activity {
     }
 
     private void populateFilesList() {
-        if (filesListContainer == null || statusEmptyView == null) return;
-        filesListContainer.removeAllViews();
+        try {
+            if (filesListContainer == null || statusEmptyView == null) return;
+            filesListContainer.removeAllViews();
 
-        String savedTree = prefs.getString(KEY_TREE_URI, null);
-        if (savedTree == null) {
-            statusEmptyView.setVisibility(View.VISIBLE);
-            statusEmptyView.setText("مرحباً بك في مفكرة أ. شفيقة مزود\n\nللبدء، يرجى اختيار مجلد لحفظ وقراءة ملفاتك النصية (.txt)\nاضغط هنا أو من الإعدادات لاختيار المجلد.");
-            statusEmptyView.setOnClickListener(v -> openFolderPicker());
-            return;
-        }
-        statusEmptyView.setOnClickListener(null);
+            String savedTree = prefs.getString(KEY_TREE_URI, null);
+            if (savedTree == null) {
+                statusEmptyView.setVisibility(View.VISIBLE);
+                statusEmptyView.setText("مرحباً بك في مفكرة أ. شفيقة مزود\n\nللبدء، يرجى اختيار مجلد لحفظ وقراءة ملفاتك النصية (.txt)\nاضغط هنا أو من الإعدادات لاختيار المجلد.");
+                statusEmptyView.setOnClickListener(v -> openFolderPicker());
+                return;
+            }
+            statusEmptyView.setOnClickListener(null);
 
-        String q = currentSearchQuery.toLowerCase(Locale.ROOT);
-        List<FileItem> filtered = new ArrayList<>();
-        for (FileItem item : allFiles) {
-            if (q.isEmpty()) {
-                filtered.add(item);
-            } else {
-                boolean nameMatch = item.displayTitle.toLowerCase(Locale.ROOT).contains(q);
-                boolean contentMatch = item.cachedContent != null &&
-                        item.cachedContent.toLowerCase(Locale.ROOT).contains(q);
-                if (nameMatch || contentMatch) {
+            String q = currentSearchQuery.toLowerCase(Locale.ROOT);
+            List<FileItem> filtered = new ArrayList<>();
+            for (FileItem item : allFiles) {
+                if (q.isEmpty()) {
                     filtered.add(item);
+                } else {
+                    boolean nameMatch = item.displayTitle.toLowerCase(Locale.ROOT).contains(q);
+                    boolean contentMatch = item.cachedContent != null &&
+                            item.cachedContent.toLowerCase(Locale.ROOT).contains(q);
+                    if (nameMatch || contentMatch) {
+                        filtered.add(item);
+                    }
                 }
             }
-        }
 
-        if (filtered.isEmpty()) {
-            statusEmptyView.setVisibility(View.VISIBLE);
-            if (q.isEmpty()) {
-                statusEmptyView.setText("لا توجد ملفات نصية (.txt) في هذا المجلد حتى الآن.\nاضغط على «＋ ملف جديد» بالأعلى لإنشاء أول ملف.");
-            } else {
-                statusEmptyView.setText("لا توجد نتائج مطابقة لبحثك: «" + currentSearchQuery + "»");
+            if (filtered.isEmpty()) {
+                statusEmptyView.setVisibility(View.VISIBLE);
+                if (q.isEmpty()) {
+                    statusEmptyView.setText("لا توجد ملفات نصية (.txt) في هذا المجلد حتى الآن.\nاضغط على «＋ ملف جديد» بالأعلى لإنشاء أول ملف.");
+                } else {
+                    statusEmptyView.setText("لا توجد نتائج مطابقة لبحثك: «" + currentSearchQuery + "»");
+                }
+                return;
             }
-            return;
-        }
 
-        statusEmptyView.setVisibility(View.GONE);
-        for (FileItem item : filtered) {
-            filesListContainer.addView(buildFileCard(item, currentSearchQuery));
+            statusEmptyView.setVisibility(View.GONE);
+            for (FileItem item : filtered) {
+                filesListContainer.addView(buildFileCard(item, currentSearchQuery));
+            }
+        } catch (Throwable ignored) {
         }
     }
 
@@ -690,7 +735,7 @@ public class MainActivity extends Activity {
         header.setText(item.displayTitle);
         header.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
         header.setTypeface(getAppTypeface(Typeface.BOLD));
-        header.setTextColor( currentTheme.primaryDark);
+        header.setTextColor(currentTheme.primaryDark);
         header.setIncludeFontPadding(false);
         header.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams hLp = new LinearLayout.LayoutParams(
@@ -1187,7 +1232,7 @@ public class MainActivity extends Activity {
     private int getDrawableIdByName(String resName) {
         try {
             return getResources().getIdentifier(resName, "drawable", getPackageName());
-        } catch (Exception e) {
+        } catch (Throwable e) {
             return 0;
         }
     }
@@ -1402,7 +1447,7 @@ public class MainActivity extends Activity {
         mainLayout.setBackgroundColor(COLOR_BG_MAIN);
         mainLayout.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
 
-        // 1. Clean Top Header Bar: [ → رجوع ]  |  Document Title (tap to rename)  |  [ + | 100% | - ]
+        // 1. Clean Top Header Bar
         LinearLayout topBar = new LinearLayout(this);
         topBar.setOrientation(LinearLayout.HORIZONTAL);
         topBar.setGravity(Gravity.CENTER_VERTICAL);
@@ -1412,7 +1457,6 @@ public class MainActivity extends Activity {
             topBar.setElevation(dp(6));
         }
 
-        // Back button on the right (RTL start)
         TextView backBtn = new TextView(this);
         backBtn.setText("→ رجوع");
         backBtn.setTextColor(Color.WHITE);
@@ -1425,7 +1469,6 @@ public class MainActivity extends Activity {
         backBtn.setOnClickListener(v -> handleBackNavigation());
         topBar.addView(backBtn);
 
-        // Document title in the center (tapping opens Rename dialog)
         docTitleView = new TextView(this);
         docTitleView.setText(activeFile != null ? activeFile.displayTitle : "ملف نصي");
         docTitleView.setTextColor(Color.WHITE);
@@ -1445,7 +1488,6 @@ public class MainActivity extends Activity {
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         topBar.addView(docTitleView, titleLp);
 
-        // Unified Zoom Capsule on the left: [ + | 100% | - ]
         LinearLayout zoomCapsule = new LinearLayout(this);
         zoomCapsule.setOrientation(LinearLayout.HORIZONTAL);
         zoomCapsule.setGravity(Gravity.CENTER_VERTICAL);
@@ -1485,7 +1527,7 @@ public class MainActivity extends Activity {
         topBar.addView(zoomCapsule);
         mainLayout.addView(topBar);
 
-        // 2. Editor Toolbar (Visible ONLY in EDIT mode)
+        // 2. Editor Toolbar
         toolbarWrapper = new LinearLayout(this);
         toolbarWrapper.setOrientation(LinearLayout.VERTICAL);
         toolbarWrapper.setVisibility(isEdit ? View.VISIBLE : View.GONE);
@@ -1573,7 +1615,7 @@ public class MainActivity extends Activity {
         paperLp.setMargins(dp(12), dp(10), dp(12), dp(8));
         mainLayout.addView(paperCard, paperLp);
 
-        // 4. Bottom Live Counter Bar (Always at the bottom of the document)
+        // 4. Bottom Live Counter Bar
         LinearLayout counterBar = new LinearLayout(this);
         counterBar.setOrientation(LinearLayout.HORIZONTAL);
         counterBar.setGravity(Gravity.CENTER);
@@ -1592,7 +1634,7 @@ public class MainActivity extends Activity {
 
         updateStatsCounter(activeFileContent);
 
-        // 5. Read-Mode Bottom Action Bar (Edit + Share buttons at the bottom)
+        // 5. Read-Mode Bottom Action Bar
         if (!isEdit) {
             LinearLayout readBottomBar = new LinearLayout(this);
             readBottomBar.setOrientation(LinearLayout.HORIZONTAL);
@@ -2033,7 +2075,7 @@ public class MainActivity extends Activity {
                     | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
                     | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
             startActivityForResult(intent, REQ_OPEN_TREE);
-        } catch (Exception e) {
+        } catch (Throwable e) {
             Toast.makeText(this, "تعذر فتح مستعرض المجلدات", Toast.LENGTH_LONG).show();
         }
     }
@@ -2049,7 +2091,7 @@ public class MainActivity extends Activity {
                 final int takeFlags = data.getFlags()
                         & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
                 getContentResolver().takePersistableUriPermission(uri, takeFlags);
-            } catch (Exception ignored) {
+            } catch (Throwable ignored) {
             }
             prefs.edit().putString(KEY_TREE_URI, uri.toString()).apply();
             Toast.makeText(this, "تم ربط المجلد بنجاح", Toast.LENGTH_SHORT).show();
@@ -2060,7 +2102,7 @@ public class MainActivity extends Activity {
     }
 
     private void refreshFileList() {
-        final String savedTree = prefs.getString(KEY_TREE_URI, null);
+        final String savedTree = prefs != null ? prefs.getString(KEY_TREE_URI, null) : null;
         if (savedTree == null) {
             allFiles.clear();
             populateFilesList();
@@ -2109,7 +2151,7 @@ public class MainActivity extends Activity {
                     }
                 }
                 Collections.sort(loaded);
-            } catch (Exception ignored) {
+            } catch (Throwable ignored) {
             }
 
             mainHandler.post(() -> {
@@ -2223,7 +2265,7 @@ public class MainActivity extends Activity {
             } else {
                 Toast.makeText(this, "تعذر إنشاء الملف", Toast.LENGTH_SHORT).show();
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             Toast.makeText(this, "خطأ أثناء إنشاء الملف: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
@@ -2248,7 +2290,7 @@ public class MainActivity extends Activity {
                                 ((ScrollView) parent).smoothScrollTo(0, Math.max(0, y - dp(60)));
                             }
                         }
-                    } catch (Exception ignored) {
+                    } catch (Throwable ignored) {
                     }
                 });
             }
@@ -2360,7 +2402,7 @@ public class MainActivity extends Activity {
             } else {
                 Toast.makeText(this, "تعذر إعادة تسمية الملف", Toast.LENGTH_SHORT).show();
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             Toast.makeText(this, "خطأ أثناء التسمية: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
@@ -2442,7 +2484,7 @@ public class MainActivity extends Activity {
             } else {
                 Toast.makeText(this, "تعذر حذف الملف", Toast.LENGTH_SHORT).show();
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             Toast.makeText(this, "خطأ أثناء الحذف: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
@@ -2472,7 +2514,7 @@ public class MainActivity extends Activity {
             intent.setType("application/zip");
             intent.putExtra(Intent.EXTRA_TITLE, zipName);
             startActivityForResult(intent, REQ_CREATE_ZIP);
-        } catch (Exception e) {
+        } catch (Throwable e) {
             Toast.makeText(this, "تعذر إنشاء ملف النسخة الاحتياطية", Toast.LENGTH_SHORT).show();
         }
     }
@@ -2498,7 +2540,7 @@ public class MainActivity extends Activity {
                 mainHandler.post(() -> Toast.makeText(this,
                         "تم حفظ النسخة الاحتياطية بنجاح (" + finalCount + " ملفات)",
                         Toast.LENGTH_LONG).show());
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 mainHandler.post(() -> Toast.makeText(this,
                         "فشل التصدير: " + e.getMessage(), Toast.LENGTH_LONG).show());
             }
@@ -2516,7 +2558,7 @@ public class MainActivity extends Activity {
                 sb.append(line);
                 first = false;
             }
-        } catch (Exception ignored) {
+        } catch (Throwable ignored) {
         }
         return sb.toString();
     }
@@ -2527,7 +2569,7 @@ public class MainActivity extends Activity {
             os.write(content.getBytes(StandardCharsets.UTF_8));
             os.flush();
             return true;
-        } catch (Exception e) {
+        } catch (Throwable e) {
             return false;
         }
     }
@@ -2690,7 +2732,7 @@ public class MainActivity extends Activity {
             if (imm != null) {
                 imm.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT);
             }
-        } catch (Exception ignored) {
+        } catch (Throwable ignored) {
         }
     }
 
@@ -2703,7 +2745,7 @@ public class MainActivity extends Activity {
                     imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
                 }
             }
-        } catch (Exception ignored) {
+        } catch (Throwable ignored) {
         }
     }
 
@@ -2712,4 +2754,3 @@ public class MainActivity extends Activity {
                 TypedValue.COMPLEX_UNIT_DIP, value, getResources().getDisplayMetrics()));
     }
 }
-
