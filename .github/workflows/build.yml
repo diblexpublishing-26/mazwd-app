@@ -22,98 +22,11 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Clean and sanitize MainActivity.java automatically
+      - name: Clean MainActivity.java if markdown fences exist
         run: |
-          python3 - << 'EOF'
-          import re
-
-          path = "app/src/main/java/com/mazwd/app/MainActivity.java"
-          with open(path, "r", encoding="utf-8", errors="ignore") as f:
-              raw = f.read()
-
-          # Remove any markdown code fences
-          lines = [line for line in raw.splitlines() if not line.strip().startswith("```")]
-          text = "\n".join(lines)
-
-          # Extract complete Java compilation units starting at 'package com.mazwd.app;'
-          starts = [m.start() for m in re.finditer(r'package\s+com\.mazwd\.app\s*;', text)]
-
-          def extract_unit(src, start_pos):
-              sub = src[start_pos:]
-              cls_match = re.search(r'public\s+class\s+MainActivity\b', sub)
-              if not cls_match:
-                  return None
-              i = cls_match.end()
-              n = len(sub)
-              depth = 0
-              started = False
-              in_str = False
-              in_char = False
-              in_line_comment = False
-              in_block_comment = False
-
-              while i < n:
-                  c = sub[i]
-                  nxt = sub[i+1] if i + 1 < n else ''
-
-                  if in_line_comment:
-                      if c == '\n':
-                          in_line_comment = False
-                  elif in_block_comment:
-                      if c == '*' and nxt == '/':
-                          in_block_comment = False
-                          i += 1
-                  elif in_str:
-                      if c == '\\':
-                          i += 1
-                      elif c == '"':
-                          in_str = False
-                  elif in_char:
-                      if c == '\\':
-                          i += 1
-                      elif c == "'":
-                          in_char = False
-                  else:
-                      if c == '/' and nxt == '/':
-                          in_line_comment = True
-                          i += 1
-                      elif c == '/' and nxt == '*':
-                          in_block_comment = True
-                          i += 1
-                      elif c == '"':
-                          in_str = True
-                      elif c == "'":
-                          in_char = True
-                      elif c == '{':
-                          depth += 1
-                          started = True
-                      elif c == '}':
-                          depth -= 1
-                          if started and depth == 0:
-                              return sub[:i+1].strip() + "\n"
-                  i += 1
-              return None
-
-          candidates = []
-          for st in starts:
-              unit = extract_unit(text, st)
-              if unit:
-                  candidates.append(unit)
-
-          if candidates:
-              chosen = candidates[0]
-              for cand in candidates:
-                  if "toolbar_order_v3" in cand:
-                      chosen = cand
-                      break
-              with open(path, "w", encoding="utf-8") as f:
-                  f.write(chosen)
-              print(f"Sanitized MainActivity.java successfully ({len(chosen.splitlines())} lines).")
-          else:
-              with open(path, "w", encoding="utf-8") as f:
-                  f.write(text.strip() + "\n")
-              print(f"Wrote MainActivity.java ({len(text.splitlines())} lines).")
-          EOF
+          if [ -f "app/src/main/java/com/mazwd/app/MainActivity.java" ]; then
+            sed -i '/^```/d' app/src/main/java/com/mazwd/app/MainActivity.java
+          fi
 
       - name: Generate Project Structure, Fonts & Vector Icons
         run: |
@@ -122,8 +35,8 @@ jobs:
           mkdir -p app/src/main/res/drawable
 
           echo "Downloading Arabic Google Fonts..."
-          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Regular.ttf" -o app/src/main/res/font/mazwd_arabic.ttf
-          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Bold.ttf" -o app/src/main/res/font/mazwd_arabic_bold.ttf
+          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/notonaskharabic/NotoNaskhArabic%5Bwght%5D.ttf" -o app/src/main/res/font/mazwd_arabic.ttf
+          cp app/src/main/res/font/mazwd_arabic.ttf app/src/main/res/font/mazwd_arabic_bold.ttf
           curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/arefruqaa/ArefRuqaa-Regular.ttf" -o app/src/main/res/font/aref_ruqaa.ttf
           curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/arefruqaa/ArefRuqaa-Bold.ttf" -o app/src/main/res/font/aref_ruqaa_bold.ttf
           curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/tajawal/Tajawal-Regular.ttf" -o app/src/main/res/font/tajawal_regular.ttf
@@ -360,8 +273,8 @@ jobs:
                   applicationId "com.mazwd.app"
                   minSdk 27
                   targetSdk 34
-                  versionCode 6
-                  versionName "2.3.1"
+                  versionCode 7
+                  versionName "2.4"
               }
 
               buildTypes {
@@ -410,5 +323,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: مفكرة-مزود-v2.3
+          name: مفكرة-مزود-v2.4
           path: app/build/outputs/apk/debug/app-debug.apk
