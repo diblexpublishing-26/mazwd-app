@@ -30,26 +30,34 @@ jobs:
             fi
           done
 
-      - name: Generate Gradle Project Files & Vector Icons
+      - name: Generate Gradle Project Files & Resources
         run: |
-          sed -i '/^\x60/d' app/src/main/java/com/mazwd/app/MainActivity.java || true
-          if ! grep -q "^package com.mazwd.app;" app/src/main/java/com/mazwd/app/MainActivity.java; then
-            sed -i '1i package com.mazwd.app;' app/src/main/java/com/mazwd/app/MainActivity.java
-          fi
-
+          mkdir -p app/src/main/java/com/mazwd/app
           mkdir -p gradle/wrapper
           mkdir -p app/src/main/res/values
           mkdir -p app/src/main/res/drawable
           mkdir -p app/src/main/res/font
 
-          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/almarai/Almarai-Regular.ttf" -o app/src/main/res/font/mazwd_arabic.ttf
-          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/almarai/Almarai-Bold.ttf" -o app/src/main/res/font/mazwd_arabic_bold.ttf
-          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/arefruqaa/ArefRuqaa-Regular.ttf" -o app/src/main/res/font/aref_ruqaa.ttf
-          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/arefruqaa/ArefRuqaa-Bold.ttf" -o app/src/main/res/font/aref_ruqaa_bold.ttf
-          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/tajawal/Tajawal-Regular.ttf" -o app/src/main/res/font/tajawal_regular.ttf
-          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/tajawal/Tajawal-Bold.ttf" -o app/src/main/res/font/tajawal_bold.ttf
-          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/reemkufi/ReemKufi%5Bwght%5D.ttf" -o app/src/main/res/font/reem_kufi.ttf
-          cp app/src/main/res/font/reem_kufi.ttf app/src/main/res/font/reem_kufi_bold.ttf
+          FOUND_FILE=$(find . -maxdepth 6 -name "MainActivity.java" | head -n 1)
+          if [ -n "$FOUND_FILE" ] && [ "$FOUND_FILE" != "./app/src/main/java/com/mazwd/app/MainActivity.java" ]; then
+            cp "$FOUND_FILE" app/src/main/java/com/mazwd/app/MainActivity.java
+          fi
+
+          if [ -f "app/src/main/java/com/mazwd/app/MainActivity.java" ]; then
+            sed -i '/^\x60/d' app/src/main/java/com/mazwd/app/MainActivity.java 2>/dev/null || true
+            if ! grep -q "^package com.mazwd.app;" app/src/main/java/com/mazwd/app/MainActivity.java 2>/dev/null; then
+              sed -i '1i package com.mazwd.app;' app/src/main/java/com/mazwd/app/MainActivity.java 2>/dev/null || true
+            fi
+          fi
+
+          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/almarai/Almarai-Regular.ttf" -o app/src/main/res/font/mazwd_arabic.ttf || true
+          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/almarai/Almarai-Bold.ttf" -o app/src/main/res/font/mazwd_arabic_bold.ttf || true
+          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/arefruqaa/ArefRuqaa-Regular.ttf" -o app/src/main/res/font/aref_ruqaa.ttf || true
+          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/arefruqaa/ArefRuqaa-Bold.ttf" -o app/src/main/res/font/aref_ruqaa_bold.ttf || true
+          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/tajawal/Tajawal-Regular.ttf" -o app/src/main/res/font/tajawal_regular.ttf || true
+          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/tajawal/Tajawal-Bold.ttf" -o app/src/main/res/font/tajawal_bold.ttf || true
+          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/reemkufi/ReemKufi%5Bwght%5D.ttf" -o app/src/main/res/font/reem_kufi.ttf || true
+          cp app/src/main/res/font/reem_kufi.ttf app/src/main/res/font/reem_kufi_bold.ttf 2>/dev/null || true
 
           cat << 'EOF' > settings.gradle
           pluginManagement {
