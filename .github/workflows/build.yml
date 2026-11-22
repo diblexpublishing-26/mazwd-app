@@ -19,25 +19,15 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Assemble Android Project Structure & Fonts & Logo
+      - name: Assemble Android Project Structure & Vector Icons & Fonts
         run: |
           mkdir -p app/src/main/java/com/mazwd/app
           mkdir -p app/src/main/res/values
           mkdir -p app/src/main/res/drawable
-          mkdir -p app/src/main/res/drawable-nodpi
           mkdir -p app/src/main/res/font
 
           if [ -f "MainActivity.java" ]; then
             grep -v '```' MainActivity.java | grep -v '^---$' > app/src/main/java/com/mazwd/app/MainActivity.java
-          fi
-
-          # إذا قام المستخدم برفع صورته باسم logo.png يتم وضع خلفية عاجية خلفها واعتمادها تلقائياً
-          if [ -f "logo.png" ]; then
-            if command -v convert >/dev/null 2>&1; then
-              convert logo.png -background "#FFFDF7" -gravity center -flatten app/src/main/res/drawable-nodpi/custom_logo.png || cp logo.png app/src/main/res/drawable-nodpi/custom_logo.png
-            else
-              cp logo.png app/src/main/res/drawable-nodpi/custom_logo.png
-            fi
           fi
 
           # تحميل الخطوط العربية مفتوحة المصدر
@@ -89,13 +79,12 @@ jobs:
                   applicationId "com.mazwd.app"
                   minSdk 27
                   targetSdk 34
-                  versionCode 4
-                  versionName "2.2"
+                  versionCode 5
+                  versionName "2.3"
               }
 
               signingConfigs {
-                   debug {
-                      // التوقيع الافتراضي للتثبيت المباشر على الهاتف
+                  debug {
                   }
               }
 
@@ -142,12 +131,12 @@ jobs:
           <resources>
               <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.Light.NoActionBar">
                   <item name="android:statusBarColor">#172554</item>
-                  <item name="android:windowBackground">#F5F7FA</item>
+                  <item name="android:windowBackground">#F4F6F9</item>
               </style>
           </resources>
           EOF
 
-          # أيقونة التطبيق المرسومة بدقة من شعار مفكرة أ. شفيقة مزود (خلفية عاجية + دفتر حلزوني + حرف م + قلم مذهّب)
+          # أيقونة التطبيق: رمز مفكرة أنيق وحديث
           cat << 'EOF' > app/src/main/res/drawable/app_icon.xml
           <?xml version="1.0" encoding="utf-8"?>
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
@@ -155,50 +144,200 @@ jobs:
               android:height="108dp"
               android:viewportWidth="108"
               android:viewportHeight="108">
-              <!-- خلفية عاجية دافئة تبرز الشعار الكحلي والذهبي -->
               <path
-                  android:fillColor="#FFFDF7"
-                  android:pathData="M18,4L90,4A14,14 0,0 1,104 18L104,90A14,14 0,0 1,90 104L18,104A14,14 0,0 1,4 90L4,18A14,14 0,0 1,18 4z" />
-              <!-- إطار ذهبي ناعم -->
+                  android:fillColor="#1E3A8A"
+                  android:pathData="M22,6L86,6A16,16 0,0 1,102 22L102,86A16,16 0,0 1,86 102L22,102A16,16 0,0 1,6 86L6,22A16,16 0,0 1,22 6z" />
               <path
-                  android:strokeColor="#D97706"
-                  android:strokeWidth="2.5"
-                  android:fillColor="#00000000"
-                  android:pathData="M18,6L90,6A12,12 0,0 1,102 18L102,90A12,12 0,0 1,90 102L18,102A12,12 0,0 1,6 90L6,18A12,12 0,0 1,18 6z" />
-              <!-- غلاف الدفتر الأزرق -->
+                  android:fillColor="#FFFFFF"
+                  android:pathData="M30,22L78,22A6,6 0,0 1,84 28L84,82A6,6 0,0 1,78 88L30,88A6,6 0,0 1,24 82L24,28A6,6 0,0 1,30 22z" />
               <path
-                  android:fillColor="#0A4D7A"
-                  android:pathData="M24,18L76,16A5,5 0,0 1,81 21L78,86A5,5 0,0 1,73 91L24,91A5,5 0,0 1,19 86L19,23A5,5 0,0 1,24 18z" />
-              <!-- ورقة الدفتر الكريمية -->
+                  android:fillColor="#F59E0B"
+                  android:pathData="M34,16L40,16L40,26L34,26z M51,16L57,16L57,26L51,26z M68,16L74,16L74,26L68,26z" />
               <path
-                  android:fillColor="#FFFBEB"
-                  android:pathData="M28,22L73,20L71,84L26,85z" />
-              <!-- سطور الدفتر -->
+                  android:fillColor="#1E3A8A"
+                  android:pathData="M34,38L74,38L74,43L34,43z M34,51L74,51L74,56L34,56z M34,64L58,64L58,69L34,69z" />
+          </vector>
+          EOF
+
+          # أيقونة الثلاث نقاط (متمركزة هندسياً 100%)
+          cat << 'EOF' > app/src/main/res/drawable/ic_more_vert.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
               <path
-                  android:strokeColor="#D6D3D1"
-                  android:strokeWidth="1.8"
-                  android:pathData="M34,34L65,33 M34,44L64,43 M34,54L64,53 M34,64L63,63" />
-              <!-- حلقات الدفتر الحلزونية -->
+                  android:fillColor="#FF000000"
+                  android:pathData="M12,8c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2zM12,10c-1.1,0 -2,0.9 -2,2s0.9,2 2,2 2,-0.9 2,-2 -0.9,-2 -2,-2zM12,16c-1.1,0 -2,0.9 -2,2s0.9,2 2,2 2,-0.9 2,-2 -0.9,-2 -2,-2z" />
+          </vector>
+          EOF
+
+          # أيقونة مقبض السحب (☰)
+          cat << 'EOF' > app/src/main/res/drawable/ic_drag_handle.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
               <path
-                  android:strokeColor="#0284C7"
-                  android:strokeWidth="3.2"
-                  android:strokeLineCap="round"
-                  android:pathData="M15,30L25,30 M15,43L25,43 M15,56L25,56 M15,69L25,69" />
-              <!-- حرف الميم (م) الأزرق المتدفق -->
+                  android:fillColor="#FF000000"
+                  android:pathData="M20,9H4v2h16V9zM4,15h16v-2H4v2z" />
+          </vector>
+          EOF
+
+          # أيقونة التراجع (Material Undo)
+          cat << 'EOF' > app/src/main/res/drawable/ic_undo.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
               <path
-                  android:strokeColor="#07416B"
-                  android:strokeWidth="8.5"
-                  android:strokeLineCap="round"
-                  android:strokeLineJoin="round"
-                  android:fillColor="#00000000"
-                  android:pathData="M27,85 Q40,58 48,42 Q59,28 67,43 Q67,56 46,52" />
-              <!-- القلم الأزرق والذهبي -->
+                  android:fillColor="#FF000000"
+                  android:pathData="M12.5,8c-2.65,0 -5.05,0.99 -6.9,2.6L2,7v9h9l-3.62,-3.62c1.39,-1.16 3.16,-1.88 5.12,-1.88 3.54,0 6.55,2.31 7.6,5.5l2.37,-0.78C21.08,11.03 17.15,8 12.5,8z" />
+          </vector>
+          EOF
+
+          # أيقونة الإعادة (Material Redo)
+          cat << 'EOF' > app/src/main/res/drawable/ic_redo.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
               <path
-                  android:fillColor="#0A4D7A"
-                  android:pathData="M86,24L93,27L77,68L70,65z" />
+                  android:fillColor="#FF000000"
+                  android:pathData="M18.4,10.6C16.55,8.99 14.15,8 11.5,8c-4.65,0 -8.58,3.03 -9.96,7.22L3.9,16c1.05,-3.19 4.05,-5.5 7.6,-5.5 1.95,0 3.73,0.72 5.12,1.88L13,16h9V7l-3.6,3.6z" />
+          </vector>
+          EOF
+
+          # أيقونة النسخ (Material Content Copy)
+          cat << 'EOF' > app/src/main/res/drawable/ic_copy.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
               <path
-                  android:fillColor="#D97706"
-                  android:pathData="M80,45L87,48L85,52L78,49z M70,65L77,68L71,79z" />
+                  android:fillColor="#FF000000"
+                  android:pathData="M16,1H4c-1.1,0 -2,0.9 -2,2v14h2V3h12V1zm3,4H8c-1.1,0 -2,0.9 -2,2v14c0,1.1 0.9,2 2,2h11c1.1,0 2,-0.9 2,-2V7c0,-1.1 -0.9,-2 -2,-2zm0,16H8V7h11v14z" />
+          </vector>
+          EOF
+
+          # أيقونة اللصق (Material Content Paste)
+          cat << 'EOF' > app/src/main/res/drawable/ic_paste.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path
+                  android:fillColor="#FF000000"
+                  android:pathData="M19,2h-4.18C14.4,0.84 13.3,0 12,0c-1.3,0 -2.4,0.84 -2.82,2H5c-1.1,0 -2,0.9 -2,2v16c0,1.1 0.9,2 2,2h14c1.1,0 2,-0.9 2,-2V4c0,-1.1 -0.9,-2 -2,-2zm-7,0c0.55,0 1,0.45 1,1s-0.45,1 -1,1 -1,-0.45 -1,-1 0.45,-1 1,-1zm7,18H5V4h2v3h10V4h2v16z" />
+          </vector>
+          EOF
+
+          # أيقونة القص (Material Content Cut)
+          cat << 'EOF' > app/src/main/res/drawable/ic_cut.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path
+                  android:fillColor="#FF000000"
+                  android:pathData="M9.64,7.64c0.23,-0.5 0.36,-1.05 0.36,-1.64 0,-2.21 -1.79,-4 -4,-4S2,3.79 2,6s1.79,4 4,4c0.59,0 1.14,-0.13 1.64,-0.36L10,12l-2.36,2.36C7.14,14.13 6.59,14 6,14c-2.21,0 -4,1.79 -4,4s1.79,4 4,4 4,-1.79 4,-4c0,-0.59 -0.13,-1.14 -0.36,-1.64L12,14l7,7h3v-1L9.64,7.64zM6,8c-1.1,0 -2,-0.89 -2,-2s0.9,-2 2,-2 2,0.89 2,2 -0.9,2 -2,2zm0,12c-1.1,0 -2,-0.89 -2,-2s0.9,-2 2,-2 2,0.89 2,2 -0.9,2 -2,2zm6,-7.5c-0.28,0 -0.5,-0.22 -0.5,-0.5s0.22,-0.5 0.5,-0.5 0.5,0.22 0.5,0.5 -0.22,0.5 -0.5,0.5zM19,3l-6,6 2,2 7,-7V3h-3z" />
+          </vector>
+          EOF
+
+          # أيقونة تحديد الكل (Material Select All)
+          cat << 'EOF' > app/src/main/res/drawable/ic_select_all.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path
+                  android:fillColor="#FF000000"
+                  android:pathData="M3,5h2V3c-1.1,0 -2,0.9 -2,2zm0,8h2v-2H3v2zm4,8h2v-2H7v2zM3,9h2V7H3v2zm10,-6h-2v2h2V3zm6,0v2h2c0,-1.1 -0.9,-2 -2,-2zM5,21v-2H3c0,1.1 0.9,2 2,2zm-2,-4h2v-2H3v2zM9,3H7v2h2V3zm2,18h2v-2h-2v2zm8,-8h2v-2h-2v2zm0,8c1.1,0 2,-0.9 2,-2h-2v2zm0,-12h2V7h-2v2zm0,8h2v-2h-2v2zm-4,4h2v-2h-2v2zm0,-16h2V3h-2v2zM7,17h10V7H7v10zm2,-8h6v6H9V9z" />
+          </vector>
+          EOF
+
+          # أيقونة التنسيق الآلي (العصا السحرية مع النجوم Material Auto Fix High)
+          cat << 'EOF' > app/src/main/res/drawable/ic_auto_format.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path
+                  android:fillColor="#FF000000"
+                  android:pathData="M7.5,5.6L10,7 8.6,4.5 10,2 7.5,3.4 5,2l1.4,2.5L5,7zm12,9.8L17,14l1.4,2.5L17,19l2.5,-1.4L22,19l-1.4,-2.5L22,14zM22,2l-2.5,1.4L17,2l1.4,2.5L17,7l2.5,-1.4L22,7l-1.4,-2.5zm-7.63,5.29c-0.39,-0.39 -1.02,-0.39 -1.41,0L1.29,18.96c-0.39,0.39 -0.39,1.02 0,1.41l2.34,2.34c0.39,0.39 1.02,0.39 1.41,0L16.7,11.05c0.39,-0.39 0.39,-1.02 0,-1.41l-2.33,-2.35zm-1.03,5.49l-2.12,-2.12 2.44,-2.44 2.12,2.12 -2.44,2.44z" />
+          </vector>
+          EOF
+
+          # أيقونة التوقيع (قلم التوقيع Material Draw/Ink Pen)
+          cat << 'EOF' > app/src/main/res/drawable/ic_signature.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path
+                  android:fillColor="#FF000000"
+                  android:pathData="M17.75,7L14,3.25l-10,10V17h3.75l10,-10zm2.96,-2.96c0.39,-0.39 0.39,-1.02 0,-1.41L18.37,0.29c-0.39,-0.39 -1.02,-0.39 -1.41,0L15,2.25 18.75,6l1.96,-1.96zM2,20h20v2H2v-2z" />
+          </vector>
+          EOF
+
+          # أيقونة تحديد لأعلى (Material Vertical Align Top)
+          cat << 'EOF' > app/src/main/res/drawable/ic_select_up.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path
+                  android:fillColor="#FF000000"
+                  android:pathData="M8,11h3v10h2V11h3l-4,-4 -4,4zM4,3v2h16V3H4z" />
+          </vector>
+          EOF
+
+          # أيقونة تحديد لأسفل (Material Vertical Align Bottom)
+          cat << 'EOF' > app/src/main/res/drawable/ic_select_down.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path
+                  android:fillColor="#FF000000"
+                  android:pathData="M16,13h-3V3h-2v10H8l4,4 4,-4zM4,19v2h16v-2H4z" />
+          </vector>
+          EOF
+
+          # أيقونة التاريخ والوقت (Material Schedule Clock)
+          cat << 'EOF' > app/src/main/res/drawable/ic_datetime.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path
+                  android:fillColor="#FF000000"
+                  android:pathData="M11.99,2C6.47,2 2,6.48 2,12s4.47,10 9.99,10C17.52,22 22,17.52 22,12S17.52,2 11.99,2zM12,20c-4.42,0 -8,-3.58 -8,-8s3.58,-8 8,-8 8,3.58 8,8 -3.58,8 -8,8zm0.5,-13H11v6l5.25,3.15 0.75,-1.23 -4.5,-2.67z" />
           </vector>
           EOF
 
