@@ -2712,3 +2712,4 @@ public class MainActivity extends Activity {
                 TypedValue.COMPLEX_UNIT_DIP, value, getResources().getDisplayMetrics()));
     }
 }
+
