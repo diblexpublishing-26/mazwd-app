@@ -31,18 +31,26 @@ jobs:
           mkdir -p app/src/main/res/drawable
           mkdir -p app/src/main/res/font
 
-          curl -sL "https://github.com/google/fonts/raw/main/ofl/tajawal/Tajawal-Regular.ttf" -o app/src/main/res/font/tajawal_regular.ttf
-          curl -sL "https://github.com/google/fonts/raw/main/ofl/tajawal/Tajawal-Bold.ttf" -o app/src/main/res/font/tajawal_bold.ttf
-          curl -sL "https://github.com/google/fonts/raw/main/ofl/arefruqaa/ArefRuqaa-Regular.ttf" -o app/src/main/res/font/aref_ruqaa.ttf
-          curl -sL "https://github.com/google/fonts/raw/main/ofl/arefruqaa/ArefRuqaa-Bold.ttf" -o app/src/main/res/font/aref_ruqaa_bold.ttf
-          curl -sL "https://github.com/google/fonts/raw/main/ofl/reemkufi/ReemKufi%5Bwght%5D.ttf" -o app/src/main/res/font/reem_kufi.ttf
+          curl -f -sL "https://github.com/google/fonts/raw/main/ofl/tajawal/Tajawal-Regular.ttf" -o app/src/main/res/font/tajawal_regular.ttf
+          curl -f -sL "https://github.com/google/fonts/raw/main/ofl/tajawal/Tajawal-Bold.ttf" -o app/src/main/res/font/tajawal_bold.ttf
+          curl -f -sL "https://github.com/google/fonts/raw/main/ofl/arefruqaa/ArefRuqaa-Regular.ttf" -o app/src/main/res/font/aref_ruqaa.ttf
+          curl -f -sL "https://github.com/google/fonts/raw/main/ofl/arefruqaa/ArefRuqaa-Bold.ttf" -o app/src/main/res/font/aref_ruqaa_bold.ttf
+          curl -f -sL "https://github.com/google/fonts/raw/main/ofl/reemkufi/ReemKufi%5Bwght%5D.ttf" -o app/src/main/res/font/reem_kufi.ttf
           cp app/src/main/res/font/reem_kufi.ttf app/src/main/res/font/reem_kufi_bold.ttf
 
-          curl -sL "https://github.com/google/fonts/raw/main/ofl/notonaskharabic/NotoNaskhArabic%5Bwght%5D.ttf" -o app/src/main/res/font/mazwd_arabic.ttf || true
-          if [ ! -f app/src/main/res/font/mazwd_arabic.ttf ] || [ $(wc -c < app/src/main/res/font/mazwd_arabic.ttf) -lt 10000 ]; then
-            cp app/src/main/res/font/tajawal_regular.ttf app/src/main/res/font/mazwd_arabic.ttf
-          fi
-          cp app/src/main/res/font/mazwd_arabic.ttf app/src/main/res/font/mazwd_arabic_bold.ttf
+          curl -f -sL "https://github.com/notofonts/arabic/raw/main/fonts/NotoNaskhArabic/hinted/ttf/NotoNaskhArabic-Regular.ttf" -o app/src/main/res/font/mazwd_arabic.ttf \
+            || curl -f -sL "https://github.com/google/fonts/raw/main/ofl/almarai/Almarai-Regular.ttf" -o app/src/main/res/font/mazwd_arabic.ttf \
+            || cp app/src/main/res/font/tajawal_regular.ttf app/src/main/res/font/mazwd_arabic.ttf
+
+          curl -f -sL "https://github.com/notofonts/arabic/raw/main/fonts/NotoNaskhArabic/hinted/ttf/NotoNaskhArabic-Bold.ttf" -o app/src/main/res/font/mazwd_arabic_bold.ttf \
+            || curl -f -sL "https://github.com/google/fonts/raw/main/ofl/almarai/Almarai-Bold.ttf" -o app/src/main/res/font/mazwd_arabic_bold.ttf \
+            || cp app/src/main/res/font/mazwd_arabic.ttf app/src/main/res/font/mazwd_arabic_bold.ttf
+
+          for f in app/src/main/res/font/*.ttf; do
+            if [ -f "$f" ] && ! file "$f" | grep -qiE "font|truetype|opentype|sfnt"; then
+              rm -f "$f"
+            fi
+          done
 
           cat << 'EOF' > settings.gradle
           pluginManagement {
