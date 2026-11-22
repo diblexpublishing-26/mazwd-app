@@ -1,5 +1,3 @@
-package com.mazwd.app;
-
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
@@ -36,8 +34,6 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
-import android.widget.AbsListView;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -49,7 +45,6 @@ import android.widget.PopupMenu;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.ScrollView;
-import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -132,7 +127,7 @@ public class MainActivity extends Activity {
     private static final String[] FONT_NAMES = {
             "Sans — خط واضح وعصري (افتراضي)",
             "تجوال — خط حديث وأنيق للمقالات",
-            "الأميري — خط نسخ كلاسيكي أصيل",
+            "النسخ الأصيل — خط نسخ كلاسيكي متوازن",
             "عارف رقعة — خط الرقعة العربي",
             "ريم كوفي — خط كوفي حديث ومميز",
             "Serif — خط إنجليزي رسمي ومريح",
@@ -160,7 +155,7 @@ public class MainActivity extends Activity {
     private int themeDark = THEME_DARK[0];
     private int themeAccent = THEME_ACCENT[0];
 
-    private Typeface fontAmiri, fontAmiriBold;
+    private Typeface fontNaskh, fontNaskhBold;
     private Typeface fontRuqaa, fontRuqaaBold;
     private Typeface fontTajawal, fontTajawalBold;
     private Typeface fontKufi, fontKufiBold;
@@ -225,8 +220,8 @@ public class MainActivity extends Activity {
     private void loadCustomFonts() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             try {
-                fontAmiri = getResources().getFont(R.font.mazwd_arabic);
-                fontAmiriBold = getResources().getFont(R.font.mazwd_arabic_bold);
+                fontNaskh = getResources().getFont(R.font.mazwd_arabic);
+                fontNaskhBold = Typeface.create(fontNaskh, Typeface.BOLD);
             } catch (Exception ignored) {}
             try {
                 fontRuqaa = getResources().getFont(R.font.aref_ruqaa);
@@ -238,7 +233,7 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {}
             try {
                 fontKufi = getResources().getFont(R.font.reem_kufi);
-                fontKufiBold = getResources().getFont(R.font.reem_kufi_bold);
+                fontKufiBold = Typeface.create(fontKufi, Typeface.BOLD);
             } catch (Exception ignored) {}
         }
     }
@@ -263,8 +258,8 @@ public class MainActivity extends Activity {
                 if (fontTajawal != null) return fontTajawal;
                 break;
             case 2:
-                if (bold && fontAmiriBold != null) return fontAmiriBold;
-                if (fontAmiri != null) return fontAmiri;
+                if (bold && fontNaskhBold != null) return fontNaskhBold;
+                if (fontNaskh != null) return fontNaskh;
                 break;
             case 3:
                 if (bold && fontRuqaaBold != null) return fontRuqaaBold;
@@ -369,7 +364,7 @@ public class MainActivity extends Activity {
         LinearLayout heroCard = new LinearLayout(this);
         heroCard.setOrientation(LinearLayout.VERTICAL);
         heroCard.setGravity(Gravity.CENTER_HORIZONTAL);
-        heroCard.setPadding(dp(20), dp(22), dp(20), dp(20));
+        heroCard.setPadding(dp(20), dp(20), dp(20), dp(18));
 
         GradientDrawable heroBg = new GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
@@ -381,9 +376,10 @@ public class MainActivity extends Activity {
 
         TextView appTitle = new TextView(this);
         appTitle.setText("مفكرة أ. شفيقة مزود");
-        appTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 23);
+        appTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
         appTitle.setTextColor(Color.WHITE);
         appTitle.setGravity(Gravity.CENTER);
+        appTitle.setIncludeFontPadding(false);
         appTitle.setTypeface(getFontTypeface(fontIndex, true));
         heroCard.addView(appTitle);
 
@@ -392,25 +388,28 @@ public class MainActivity extends Activity {
         appSub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         appSub.setTextColor(0xFFE2E8F0);
         appSub.setGravity(Gravity.CENTER);
-        appSub.setPadding(0, dp(4), 0, dp(16));
+        appSub.setIncludeFontPadding(false);
+        appSub.setPadding(0, dp(6), 0, dp(14));
         appSub.setTypeface(getFontTypeface(fontIndex, false));
         heroCard.addView(appSub);
 
         Button newFileBtn = new Button(this);
         newFileBtn.setText("＋ ملف جديد");
         newFileBtn.setAllCaps(false);
-        newFileBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        newFileBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         newFileBtn.setTextColor(themePrimary);
+        newFileBtn.setGravity(Gravity.CENTER);
+        newFileBtn.setIncludeFontPadding(false);
         newFileBtn.setTypeface(getFontTypeface(fontIndex, true));
         GradientDrawable newBtnBg = new GradientDrawable();
         newBtnBg.setColor(Color.WHITE);
         newBtnBg.setCornerRadius(dp(14));
         newFileBtn.setBackground(newBtnBg);
-        newFileBtn.setPadding(dp(28), dp(10), dp(28), dp(10));
+        newFileBtn.setPadding(dp(20), 0, dp(20), 0);
         newFileBtn.setOnClickListener(v -> showCreateFileDialog());
 
         LinearLayout.LayoutParams newBtnLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
         heroCard.addView(newFileBtn, newBtnLp);
 
         root.addView(heroCard, new LinearLayout.LayoutParams(
@@ -424,8 +423,9 @@ public class MainActivity extends Activity {
 
         TextView sectionTitle = new TextView(this);
         sectionTitle.setText("ملفاتي النصية");
-        sectionTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        sectionTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         sectionTitle.setTextColor(COLOR_TEXT_MAIN);
+        sectionTitle.setIncludeFontPadding(false);
         sectionTitle.setTypeface(getFontTypeface(fontIndex, true));
         LinearLayout.LayoutParams stLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         sectionRow.addView(sectionTitle, stLp);
@@ -448,7 +448,7 @@ public class MainActivity extends Activity {
         LinearLayout searchWrap = new LinearLayout(this);
         searchWrap.setOrientation(LinearLayout.HORIZONTAL);
         searchWrap.setGravity(Gravity.CENTER_VERTICAL);
-        searchWrap.setPadding(dp(14), dp(4), dp(14), dp(4));
+        searchWrap.setPadding(dp(14), dp(2), dp(14), dp(2));
         GradientDrawable searchBg = new GradientDrawable();
         searchBg.setColor(COLOR_CARD);
         searchBg.setCornerRadius(dp(14));
@@ -456,19 +456,20 @@ public class MainActivity extends Activity {
         searchWrap.setBackground(searchBg);
 
         EditText searchInput = new EditText(this);
-        searchInput.setHint("🔍 ابحث في أسماء ومحتوى ملفاتك...");
+        searchInput.setHint("ابحث في أسماء ومحتوى ملفاتك...");
         searchInput.setHintTextColor(COLOR_TEXT_SUB);
         searchInput.setTextColor(COLOR_TEXT_MAIN);
-        searchInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        searchInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         searchInput.setSingleLine(true);
         searchInput.setBackground(null);
+        searchInput.setIncludeFontPadding(false);
         searchInput.setPadding(dp(8), dp(10), dp(8), dp(10));
         searchInput.setTypeface(getFontTypeface(fontIndex, false));
         searchInput.setText(currentSearchQuery);
 
         TextView clearSearchBtn = new TextView(this);
         clearSearchBtn.setText("✕");
-        clearSearchBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        clearSearchBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         clearSearchBtn.setTextColor(COLOR_TEXT_SUB);
         clearSearchBtn.setPadding(dp(10), dp(6), dp(10), dp(6));
         clearSearchBtn.setVisibility(currentSearchQuery.isEmpty() ? View.GONE : View.VISIBLE);
@@ -511,7 +512,7 @@ public class MainActivity extends Activity {
         LinearLayout bottomBar = new LinearLayout(this);
         bottomBar.setOrientation(LinearLayout.HORIZONTAL);
         bottomBar.setGravity(Gravity.CENTER);
-        bottomBar.setPadding(dp(16), dp(12), dp(16), dp(12));
+        bottomBar.setPadding(dp(16), dp(10), dp(16), dp(10));
         bottomBar.setBackgroundColor(COLOR_CARD);
         bottomBar.setElevation(dp(8));
 
@@ -520,12 +521,12 @@ public class MainActivity extends Activity {
 
         View space = new View(this);
 
-        Button backupBtn = makePrimaryButton("📦 نسخ احتياطي (ZIP)");
+        Button backupBtn = makePrimaryButton("نسخ احتياطي (ZIP)");
         backupBtn.setOnClickListener(v -> createZipBackup());
 
-        bottomBar.addView(settingsBtn, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        bottomBar.addView(settingsBtn, new LinearLayout.LayoutParams(0, dp(46), 1f));
         bottomBar.addView(space, new LinearLayout.LayoutParams(dp(12), dp(1)));
-        bottomBar.addView(backupBtn, new LinearLayout.LayoutParams(0, dp(48), 1.2f));
+        bottomBar.addView(backupBtn, new LinearLayout.LayoutParams(0, dp(46), 1.2f));
 
         root.addView(bottomBar, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -591,17 +592,17 @@ public class MainActivity extends Activity {
 
             TextView msg = new TextView(this);
             msg.setText("لم يتم تحديد مجلد لحفظ الملفات النصية بعد.\nاضغط الزر بالأسفل لاختيار مجلد على هاتفك.");
-            msg.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+            msg.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
             msg.setTextColor(COLOR_TEXT_SUB);
             msg.setGravity(Gravity.CENTER);
             msg.setTypeface(getFontTypeface(fontIndex, false));
             emptyBox.addView(msg);
 
-            Button pickBtn = makePrimaryButton("📁 اختيار مجلد الحفظ الآن");
+            Button pickBtn = makePrimaryButton("اختيار مجلد الحفظ الآن");
             LinearLayout.LayoutParams pbLp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    ViewGroup.LayoutParams.WRAP_CONTENT, dp(46));
             pbLp.topMargin = dp(18);
-            pickBtn.setPadding(dp(24), dp(12), dp(24), dp(12));
+            pickBtn.setPadding(dp(24), 0, dp(24), 0);
             pickBtn.setOnClickListener(v -> openFolderPicker());
             emptyBox.addView(pickBtn, pbLp);
 
@@ -636,7 +637,7 @@ public class MainActivity extends Activity {
             emptyTv.setText(qLower.isEmpty()
                     ? "لا توجد ملفات نصية حالياً.\nاضغط «＋ ملف جديد» بالأعلى للبدء."
                     : "لا توجد نتائج مطابقة لبحثك: «" + query + "»");
-            emptyTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+            emptyTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
             emptyTv.setTextColor(COLOR_TEXT_SUB);
             emptyTv.setGravity(Gravity.CENTER);
             emptyTv.setPadding(dp(20), dp(48), dp(20), dp(48));
@@ -662,8 +663,9 @@ public class MainActivity extends Activity {
         textCol.setOrientation(LinearLayout.VERTICAL);
 
         TextView titleTv = new TextView(this);
-        titleTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        titleTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         titleTv.setTextColor(COLOR_TEXT_MAIN);
+        titleTv.setIncludeFontPadding(false);
         titleTv.setTypeface(getFontTypeface(fontIndex, true));
         titleTv.setMaxLines(1);
         titleTv.setEllipsize(TextUtils.TruncateAt.END);
@@ -683,7 +685,8 @@ public class MainActivity extends Activity {
         dateTv.setText(item.lastModified > 0 ? sdf.format(new Date(item.lastModified)) : "ملف نصي TXT");
         dateTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         dateTv.setTextColor(COLOR_TEXT_SUB);
-        dateTv.setPadding(0, dp(4), 0, 0);
+        dateTv.setIncludeFontPadding(false);
+        dateTv.setPadding(0, dp(5), 0, 0);
         textCol.addView(dateTv);
 
         if (query != null && !query.isEmpty() && item.contentCache != null
@@ -764,11 +767,11 @@ public class MainActivity extends Activity {
 
     private void showFileOptionsMenu(View anchor, final FileItem item) {
         PopupMenu popup = new PopupMenu(this, anchor);
-        popup.getMenu().add(0, 1, 0, "📖 قراءة الملف");
-        popup.getMenu().add(0, 2, 1, "✏️ تحرير الملف");
-        popup.getMenu().add(0, 3, 2, "🏷️ إعادة تسمية");
-        popup.getMenu().add(0, 4, 3, "📤 مشاركة الملف");
-        popup.getMenu().add(0, 5, 4, "🗑️ حذف الملف");
+        popup.getMenu().add(0, 1, 0, "قراءة الملف");
+        popup.getMenu().add(0, 2, 1, "تحرير الملف");
+        popup.getMenu().add(0, 3, 2, "إعادة تسمية");
+        popup.getMenu().add(0, 4, 3, "مشاركة الملف");
+        popup.getMenu().add(0, 5, 4, "حذف الملف");
 
         popup.setOnMenuItemClickListener(menuItem -> {
             switch (menuItem.getItemId()) {
@@ -798,15 +801,16 @@ public class MainActivity extends Activity {
 
         TextView title = new TextView(this);
         title.setText("إنشاء ملف نصي جديد");
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
         title.setTextColor(themePrimary);
+        title.setIncludeFontPadding(false);
         title.setTypeface(getFontTypeface(fontIndex, true));
         box.addView(title);
 
         EditText input = new EditText(this);
         input.setHint("اكتب اسم الملف هنا...");
         input.setSingleLine(true);
-        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         input.setTypeface(getFontTypeface(fontIndex, false));
         LinearLayout.LayoutParams inLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -926,6 +930,8 @@ public class MainActivity extends Activity {
         backBtn.setText("→ رجوع");
         backBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         backBtn.setTextColor(Color.WHITE);
+        backBtn.setIncludeFontPadding(false);
+        backBtn.setGravity(Gravity.CENTER);
         backBtn.setTypeface(getFontTypeface(fontIndex, true));
         backBtn.setPadding(dp(12), dp(6), dp(12), dp(6));
         GradientDrawable backBg = new GradientDrawable();
@@ -943,8 +949,9 @@ public class MainActivity extends Activity {
 
         TextView titleTv = new TextView(this);
         titleTv.setText(currentFile.displayName);
-        titleTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        titleTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         titleTv.setTextColor(Color.WHITE);
+        titleTv.setIncludeFontPadding(false);
         titleTv.setTypeface(getFontTypeface(fontIndex, true));
         titleTv.setSingleLine(true);
         titleTv.setEllipsize(TextUtils.TruncateAt.END);
@@ -1105,12 +1112,13 @@ public class MainActivity extends Activity {
         statsTextView.setTextColor(COLOR_TEXT_SUB);
         statsTextView.setBackgroundColor(0xFFF8FAFC);
         statsTextView.setGravity(Gravity.CENTER);
-        statsTextView.setPadding(dp(12), dp(6), dp(12), dp(6));
+        statsTextView.setIncludeFontPadding(false);
+        statsTextView.setPadding(dp(12), dp(7), dp(12), dp(7));
         statsTextView.setTypeface(getFontTypeface(fontIndex, false));
         root.addView(statsTextView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        // 5. Bottom Read Action Bar (Edit + Share buttons in READ mode)
+        // 5. Bottom Read Action Bar (Dignified Edit + Share buttons without childish emojis)
         if (currentMode == Mode.READ) {
             LinearLayout readBottomBar = new LinearLayout(this);
             readBottomBar.setOrientation(LinearLayout.HORIZONTAL);
@@ -1119,12 +1127,12 @@ public class MainActivity extends Activity {
             readBottomBar.setBackgroundColor(COLOR_CARD);
             readBottomBar.setElevation(dp(8));
 
-            Button editFileBtn = makePrimaryButton("✏️ تحرير الملف");
+            Button editFileBtn = makePrimaryButton("تحرير الملف");
             editFileBtn.setOnClickListener(v -> switchMode(Mode.EDIT, false));
 
             View space = new View(this);
 
-            Button shareFileBtn = makeSecondaryButton("📤 مشاركة الملف");
+            Button shareFileBtn = makeSecondaryButton("مشاركة الملف");
             shareFileBtn.setOnClickListener(v -> {
                 if (currentFile != null) shareFile(currentFile);
             });
@@ -1179,9 +1187,10 @@ public class MainActivity extends Activity {
             tv.setText(getToolLabel(toolId));
             tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
             tv.setTextColor(themePrimary);
+            tv.setIncludeFontPadding(false);
             tv.setTypeface(getFontTypeface(fontIndex, true));
             tv.setGravity(Gravity.CENTER);
-            tv.setPadding(dp(14), dp(6), dp(14), dp(6));
+            tv.setPadding(dp(14), 0, dp(14), 0);
             tv.setBackground(bg);
             tv.setOnClickListener(v -> executeTool(toolId));
             tv.setLayoutParams(lp);
@@ -1313,6 +1322,7 @@ public class MainActivity extends Activity {
         t.setText("إعداد التوقيع الشخصي");
         t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
         t.setTextColor(themePrimary);
+        t.setIncludeFontPadding(false);
         t.setTypeface(getFontTypeface(fontIndex, true));
         box.addView(t);
 
@@ -1355,9 +1365,10 @@ public class MainActivity extends Activity {
         root.setBackground(rootBg);
 
         TextView title = new TextView(this);
-        title.setText("🛠 تخصيص وترتيب أدوات التحرير");
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        title.setText("تخصيص وترتيب أدوات التحرير");
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
         title.setTextColor(themePrimary);
+        title.setIncludeFontPadding(false);
         title.setTypeface(getFontTypeface(fontIndex, true));
         root.addView(title);
 
@@ -1365,7 +1376,7 @@ public class MainActivity extends Activity {
         sub.setText("اسحب من رمز الخطوط (≡) للأعلى أو للأسفل لترتيب الأدوات (الأعلى يظهر أولاً من اليمين):");
         sub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         sub.setTextColor(COLOR_TEXT_SUB);
-        sub.setPadding(0, dp(4), 0, dp(10));
+        sub.setPadding(0, dp(6), 0, dp(10));
         sub.setTypeface(getFontTypeface(fontIndex, false));
         root.addView(sub);
 
@@ -1390,14 +1401,19 @@ public class MainActivity extends Activity {
         final ScrollView scrollView = new ScrollView(this);
         final LinearLayout listContainer = new LinearLayout(this);
         listContainer.setOrientation(LinearLayout.VERTICAL);
+        listContainer.setClipChildren(false);
+        listContainer.setClipToPadding(false);
         scrollView.addView(listContainer);
 
         LinearLayout.LayoutParams scLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(350));
         root.addView(scrollView, scLp);
 
+        final boolean[] isDragging = {false};
         final Runnable[] rebuildListRef = new Runnable[1];
+
         rebuildListRef[0] = () -> {
+            if (listContainer == null) return;
             listContainer.removeAllViews();
             final int count = tempOrder.size();
             final View[] rowViews = new View[count];
@@ -1443,6 +1459,7 @@ public class MainActivity extends Activity {
                 labelTv.setText(getToolLabel(toolId));
                 labelTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
                 labelTv.setTextColor(COLOR_TEXT_MAIN);
+                labelTv.setIncludeFontPadding(false);
                 labelTv.setTypeface(getFontTypeface(fontIndex, true));
                 row.addView(labelTv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
@@ -1455,7 +1472,11 @@ public class MainActivity extends Activity {
                 });
                 row.addView(cb);
 
-                row.setOnClickListener(v -> cb.setChecked(!cb.isChecked()));
+                row.setOnClickListener(v -> {
+                    if (!isDragging[0]) {
+                        cb.setChecked(!cb.isChecked());
+                    }
+                });
 
                 handleWrap.setOnTouchListener(new View.OnTouchListener() {
                     int dragTargetIndex = startIndex;
@@ -1464,54 +1485,70 @@ public class MainActivity extends Activity {
 
                     @Override
                     public boolean onTouch(View v, MotionEvent event) {
-                        switch (event.getActionMasked()) {
-                            case MotionEvent.ACTION_DOWN:
-                                scrollView.requestDisallowInterceptTouchEvent(true);
-                                downRawY = event.getRawY();
-                                dragTargetIndex = startIndex;
-                                if (row.getHeight() > 0) rowStepPx = row.getHeight() + dp(8);
-                                row.bringToFront();
-                                row.setElevation(dp(8));
-                                row.setAlpha(0.93f);
-                                return true;
+                        int action = event.getActionMasked();
+                        if (action == MotionEvent.ACTION_DOWN) {
+                            if (isDragging[0]) return false;
+                            isDragging[0] = true;
+                            scrollView.requestDisallowInterceptTouchEvent(true);
+                            downRawY = event.getRawY();
+                            dragTargetIndex = startIndex;
 
-                            case MotionEvent.ACTION_MOVE: {
-                                float dy = event.getRawY() - downRawY;
-                                float minDy = -startIndex * (float) rowStepPx;
-                                float maxDy = (count - 1 - startIndex) * (float) rowStepPx;
-                                if (dy < minDy) dy = minDy;
-                                if (dy > maxDy) dy = maxDy;
-                                row.setTranslationY(dy);
-
-                                int offsetSlots = Math.round(dy / rowStepPx);
-                                int newTarget = Math.max(0, Math.min(count - 1, startIndex + offsetSlots));
-                                if (newTarget != dragTargetIndex) {
-                                    dragTargetIndex = newTarget;
-                                    for (int i = 0; i < count; i++) {
-                                        if (i == startIndex) continue;
-                                        float shift = 0f;
-                                        if (startIndex < dragTargetIndex && i > startIndex && i <= dragTargetIndex) {
-                                            shift = -rowStepPx;
-                                        } else if (startIndex > dragTargetIndex && i >= dragTargetIndex && i < startIndex) {
-                                            shift = rowStepPx;
-                                        }
-                                        rowViews[i].animate().translationY(shift).setDuration(110).start();
-                                    }
-                                }
-                                return true;
+                            if (count > 1 && rowViews[1] != null && rowViews[0] != null
+                                    && rowViews[1].getTop() > rowViews[0].getTop()) {
+                                rowStepPx = rowViews[1].getTop() - rowViews[0].getTop();
+                            } else if (row.getHeight() > 0) {
+                                rowStepPx = row.getHeight() + dp(8);
                             }
+                            if (rowStepPx <= 0) rowStepPx = dp(56);
 
-                            case MotionEvent.ACTION_UP:
-                            case MotionEvent.ACTION_CANCEL:
-                                scrollView.requestDisallowInterceptTouchEvent(false);
-                                row.setElevation(0f);
-                                row.setAlpha(1f);
-                                if (dragTargetIndex != startIndex) {
-                                    String moved = tempOrder.remove(startIndex);
-                                    tempOrder.add(dragTargetIndex, moved);
+                            row.setTranslationZ(dp(12));
+                            row.setAlpha(0.94f);
+                            return true;
+                        } else if (action == MotionEvent.ACTION_MOVE) {
+                            if (!isDragging[0]) return false;
+                            float dy = event.getRawY() - downRawY;
+                            float minDy = -startIndex * (float) rowStepPx;
+                            float maxDy = (count - 1 - startIndex) * (float) rowStepPx;
+                            if (dy < minDy) dy = minDy;
+                            if (dy > maxDy) dy = maxDy;
+                            row.setTranslationY(dy);
+
+                            int offsetSlots = Math.round(dy / (float) rowStepPx);
+                            int newTarget = Math.max(0, Math.min(count - 1, startIndex + offsetSlots));
+                            if (newTarget != dragTargetIndex) {
+                                dragTargetIndex = newTarget;
+                                for (int i = 0; i < count; i++) {
+                                    if (i == startIndex || rowViews[i] == null) continue;
+                                    float shift = 0f;
+                                    if (startIndex < dragTargetIndex && i > startIndex && i <= dragTargetIndex) {
+                                        shift = -rowStepPx;
+                                    } else if (startIndex > dragTargetIndex && i >= dragTargetIndex && i < startIndex) {
+                                        shift = rowStepPx;
+                                    }
+                                    rowViews[i].setTranslationY(shift);
                                 }
-                                rebuildListRef[0].run();
-                                return true;
+                            }
+                            return true;
+                        } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                            if (!isDragging[0]) return false;
+                            isDragging[0] = false;
+                            scrollView.requestDisallowInterceptTouchEvent(false);
+                            row.setTranslationZ(0f);
+                            row.setAlpha(1f);
+
+                            final int finalTarget = dragTargetIndex;
+                            listContainer.post(() -> {
+                                try {
+                                    if (finalTarget != startIndex
+                                            && startIndex >= 0 && startIndex < tempOrder.size()
+                                            && finalTarget >= 0 && finalTarget < tempOrder.size()) {
+                                        String moved = tempOrder.remove(startIndex);
+                                        tempOrder.add(finalTarget, moved);
+                                    }
+                                    rebuildListRef[0].run();
+                                } catch (Exception ignored) {}
+                            });
+                            return true;
                         }
                         return false;
                     }
@@ -1638,7 +1675,7 @@ public class MainActivity extends Activity {
         String formatted = autoFormatArabicText(current);
         editorView.setText(formatted);
         editorView.setSelection(formatted.length());
-        showToast("تم تنسيق النص آلياً ✨");
+        showToast("تم تنسيق النص آلياً ✓");
     }
 
     private String autoFormatArabicText(String input) {
@@ -1681,15 +1718,16 @@ public class MainActivity extends Activity {
 
         TextView t = new TextView(this);
         t.setText("إعادة تسمية الملف");
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
         t.setTextColor(themePrimary);
+        t.setIncludeFontPadding(false);
         t.setTypeface(getFontTypeface(fontIndex, true));
         box.addView(t);
 
         EditText input = new EditText(this);
         input.setText(item.displayName);
         input.setSingleLine(true);
-        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         input.setTypeface(getFontTypeface(fontIndex, false));
         input.setSelection(item.displayName.length());
         LinearLayout.LayoutParams inLp = new LinearLayout.LayoutParams(
@@ -1788,138 +1826,117 @@ public class MainActivity extends Activity {
 
         TextView title = new TextView(this);
         title.setText("⚙ إعدادات المفكرة");
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 19);
         title.setTextColor(themePrimary);
+        title.setIncludeFontPadding(false);
         title.setTypeface(getFontTypeface(fontIndex, true));
         title.setPadding(0, 0, 0, dp(14));
         root.addView(title);
 
-        // 1. Color Themes
+        final int[] selectedTheme = {themeIndex};
+        final int[] selectedFont = {fontIndex};
+
+        // 1. Color Theme Dropdown Box (Single box that opens the 8 themes list on tap)
         TextView themeLabel = new TextView(this);
-        themeLabel.setText("🎨 لون المظهر:");
-        themeLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        themeLabel.setText("لون المظهر (8 ثيمات):");
+        themeLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         themeLabel.setTextColor(COLOR_TEXT_MAIN);
+        themeLabel.setIncludeFontPadding(false);
         themeLabel.setTypeface(getFontTypeface(fontIndex, true));
         root.addView(themeLabel);
 
-        final int[] selectedTheme = {themeIndex};
-        LinearLayout themeContainer = new LinearLayout(this);
-        themeContainer.setOrientation(LinearLayout.VERTICAL);
-        themeContainer.setPadding(0, dp(8), 0, dp(14));
+        LinearLayout themeBox = new LinearLayout(this);
+        themeBox.setOrientation(LinearLayout.HORIZONTAL);
+        themeBox.setGravity(Gravity.CENTER_VERTICAL);
+        themeBox.setPadding(dp(14), 0, dp(14), 0);
+        GradientDrawable themeBoxBg = new GradientDrawable();
+        themeBoxBg.setColor(0xFFF8FAFC);
+        themeBoxBg.setCornerRadius(dp(12));
+        themeBoxBg.setStroke(dp(1), COLOR_DIVIDER);
+        themeBox.setBackground(themeBoxBg);
 
-        final List<TextView> themeChips = new ArrayList<>();
-        for (int rowIdx = 0; rowIdx < 4; rowIdx++) {
-            LinearLayout r = new LinearLayout(this);
-            r.setOrientation(LinearLayout.HORIZONTAL);
-            for (int col = 0; col < 2; col++) {
-                final int idx = rowIdx * 2 + col;
-                final TextView chip = new TextView(this);
-                chip.setText(THEME_NAMES[idx]);
-                chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-                chip.setGravity(Gravity.CENTER);
-                chip.setPadding(dp(8), dp(10), dp(8), dp(10));
-                chip.setTypeface(getFontTypeface(fontIndex, true));
+        final View themeDot = new View(this);
+        final GradientDrawable dotBg = new GradientDrawable();
+        dotBg.setShape(GradientDrawable.OVAL);
+        dotBg.setColor(THEME_PRIMARY[selectedTheme[0]]);
+        themeDot.setBackground(dotBg);
+        LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dp(18), dp(18));
+        dotLp.leftMargin = dp(10);
+        themeBox.addView(themeDot, dotLp);
 
-                LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-                cLp.setMargins(dp(4), dp(4), dp(4), dp(4));
-                r.addView(chip, cLp);
-                themeChips.add(chip);
+        final TextView themeValueTv = new TextView(this);
+        themeValueTv.setText(THEME_NAMES[selectedTheme[0]]);
+        themeValueTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        themeValueTv.setTextColor(COLOR_TEXT_MAIN);
+        themeValueTv.setIncludeFontPadding(false);
+        themeValueTv.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
+        themeValueTv.setTypeface(getFontTypeface(fontIndex, false));
+        themeBox.addView(themeValueTv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-                chip.setOnClickListener(v -> {
-                    selectedTheme[0] = idx;
-                    for (int k = 0; k < themeChips.size(); k++) {
-                        TextView tc = themeChips.get(k);
-                        GradientDrawable g = new GradientDrawable();
-                        g.setCornerRadius(dp(10));
-                        if (k == selectedTheme[0]) {
-                            g.setColor(THEME_PRIMARY[k]);
-                            tc.setTextColor(Color.WHITE);
-                        } else {
-                            g.setColor(THEME_ACCENT[k]);
-                            g.setStroke(dp(1), THEME_PRIMARY[k]);
-                            tc.setTextColor(THEME_PRIMARY[k]);
-                        }
-                        tc.setBackground(g);
-                    }
-                });
-            }
-            themeContainer.addView(r);
-        }
-        // Initialize chip styles
-        for (int k = 0; k < themeChips.size(); k++) {
-            TextView tc = themeChips.get(k);
-            GradientDrawable g = new GradientDrawable();
-            g.setCornerRadius(dp(10));
-            if (k == selectedTheme[0]) {
-                g.setColor(THEME_PRIMARY[k]);
-                tc.setTextColor(Color.WHITE);
-            } else {
-                g.setColor(THEME_ACCENT[k]);
-                g.setStroke(dp(1), THEME_PRIMARY[k]);
-                tc.setTextColor(THEME_PRIMARY[k]);
-            }
-            tc.setBackground(g);
-        }
-        root.addView(themeContainer);
+        TextView themeArrow = new TextView(this);
+        themeArrow.setText("▾");
+        themeArrow.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        themeArrow.setTextColor(COLOR_TEXT_SUB);
+        themeBox.addView(themeArrow);
 
-        // 2. Font Selection Spinner (with full vertical padding so Amiri never clips)
+        themeBox.setOnClickListener(v -> showThemeDropdownDialog(selectedTheme, dotBg, themeValueTv));
+
+        LinearLayout.LayoutParams tbBoxLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(48));
+        tbBoxLp.topMargin = dp(6);
+        tbBoxLp.bottomMargin = dp(14);
+        root.addView(themeBox, tbBoxLp);
+
+        // 2. Font Selection Dropdown Box (Single box that opens the 7 fonts list with zero top gap)
         TextView fontLabel = new TextView(this);
-        fontLabel.setText("🔤 نوع الخط:");
-        fontLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        fontLabel.setText("نوع الخط:");
+        fontLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         fontLabel.setTextColor(COLOR_TEXT_MAIN);
+        fontLabel.setIncludeFontPadding(false);
         fontLabel.setTypeface(getFontTypeface(fontIndex, true));
         root.addView(fontLabel);
 
-        final Spinner fontSpin = new Spinner(this);
-        GradientDrawable spinBg = new GradientDrawable();
-        spinBg.setColor(0xFFF8FAFC);
-        spinBg.setCornerRadius(dp(12));
-        spinBg.setStroke(dp(1), COLOR_DIVIDER);
-        fontSpin.setBackground(spinBg);
+        LinearLayout fontBox = new LinearLayout(this);
+        fontBox.setOrientation(LinearLayout.HORIZONTAL);
+        fontBox.setGravity(Gravity.CENTER_VERTICAL);
+        fontBox.setPadding(dp(14), 0, dp(14), 0);
+        GradientDrawable fontBoxBg = new GradientDrawable();
+        fontBoxBg.setColor(0xFFF8FAFC);
+        fontBoxBg.setCornerRadius(dp(12));
+        fontBoxBg.setStroke(dp(1), COLOR_DIVIDER);
+        fontBox.setBackground(fontBoxBg);
 
-        ArrayAdapter<String> fontAdapter = new ArrayAdapter<String>(this,
-                android.R.layout.simple_spinner_item, FONT_NAMES) {
-            @Override
-            public View getView(int position, View convertView, ViewGroup parent) {
-                TextView tv = (TextView) super.getView(position, convertView, parent);
-                tv.setTextColor(COLOR_TEXT_MAIN);
-                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-                tv.setTypeface(getFontTypeface(position, false));
-                tv.setIncludeFontPadding(true);
-                tv.setSingleLine(false);
-                tv.setPadding(dp(12), dp(12), dp(12), dp(12));
-                return tv;
-            }
+        final TextView fontValueTv = new TextView(this);
+        fontValueTv.setText(FONT_NAMES[selectedFont[0]]);
+        fontValueTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        fontValueTv.setTextColor(COLOR_TEXT_MAIN);
+        fontValueTv.setIncludeFontPadding(false);
+        fontValueTv.setSingleLine(true);
+        fontValueTv.setEllipsize(TextUtils.TruncateAt.END);
+        fontValueTv.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
+        fontValueTv.setTypeface(getFontTypeface(selectedFont[0], false));
+        fontBox.addView(fontValueTv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-            @Override
-            public View getDropDownView(int position, View convertView, ViewGroup parent) {
-                TextView tv = (TextView) super.getDropDownView(position, convertView, parent);
-                tv.setTextColor(COLOR_TEXT_MAIN);
-                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-                tv.setTypeface(getFontTypeface(position, false));
-                tv.setIncludeFontPadding(true);
-                tv.setSingleLine(false);
-                tv.setMinHeight(dp(54));
-                tv.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
-                tv.setPadding(dp(16), dp(14), dp(16), dp(14));
-                tv.setLayoutParams(new AbsListView.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-                return tv;
-            }
-        };
-        fontSpin.setAdapter(fontAdapter);
-        fontSpin.setSelection(fontIndex);
-        LinearLayout.LayoutParams spLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        spLp.topMargin = dp(6);
-        spLp.bottomMargin = dp(14);
-        root.addView(fontSpin, spLp);
+        TextView fontArrow = new TextView(this);
+        fontArrow.setText("▾");
+        fontArrow.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        fontArrow.setTextColor(COLOR_TEXT_SUB);
+        fontBox.addView(fontArrow);
+
+        fontBox.setOnClickListener(v -> showFontDropdownDialog(selectedFont, fontValueTv));
+
+        LinearLayout.LayoutParams fnBoxLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(48));
+        fnBoxLp.topMargin = dp(6);
+        fnBoxLp.bottomMargin = dp(14);
+        root.addView(fontBox, fnBoxLp);
 
         // 3. Toolbar Display Style (Text vs Icons) + Customize Button
         TextView tbLabel = new TextView(this);
-        tbLabel.setText("🛠 شريط أدوات التحرير:");
-        tbLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        tbLabel.setText("شريط أدوات التحرير:");
+        tbLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         tbLabel.setTextColor(COLOR_TEXT_MAIN);
+        tbLabel.setIncludeFontPadding(false);
         tbLabel.setTypeface(getFontTypeface(fontIndex, true));
         root.addView(tbLabel);
 
@@ -1947,7 +1964,7 @@ public class MainActivity extends Activity {
         else rbText.setChecked(true);
         root.addView(modeGroup);
 
-        Button customizeToolbarBtn = makeSecondaryButton("🛠 تخصيص وترتيب أدوات التحرير");
+        Button customizeToolbarBtn = makeSecondaryButton("تخصيص وترتيب أدوات التحرير");
         customizeToolbarBtn.setOnClickListener(v -> showCustomizeToolbarDialog());
         LinearLayout.LayoutParams ctLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(44));
@@ -1956,9 +1973,10 @@ public class MainActivity extends Activity {
 
         // 4. Custom Signature Field
         TextView sigLabel = new TextView(this);
-        sigLabel.setText("✒️ التوقيع الشخصي:");
-        sigLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        sigLabel.setText("التوقيع الشخصي:");
+        sigLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         sigLabel.setTextColor(COLOR_TEXT_MAIN);
+        sigLabel.setIncludeFontPadding(false);
         sigLabel.setTypeface(getFontTypeface(fontIndex, true));
         root.addView(sigLabel);
 
@@ -1984,7 +2002,7 @@ public class MainActivity extends Activity {
         root.addView(sigInput, sgLp);
 
         // 5. Change Storage Folder Button
-        Button folderBtn = makeSecondaryButton("📁 تغيير مجلد حفظ الملفات");
+        Button folderBtn = makeSecondaryButton("تغيير مجلد حفظ الملفات");
         folderBtn.setOnClickListener(v -> {
             dialog.dismiss();
             openFolderPicker();
@@ -2007,7 +2025,7 @@ public class MainActivity extends Activity {
         Button saveBtn = makePrimaryButton("حفظ الإعدادات");
         saveBtn.setOnClickListener(v -> {
             themeIndex = selectedTheme[0];
-            fontIndex = fontSpin.getSelectedItemPosition();
+            fontIndex = selectedFont[0];
             toolbarIconsOnly = rbIcons.isChecked();
             String newSig = sigInput.getText().toString().trim();
 
@@ -2044,6 +2062,157 @@ public class MainActivity extends Activity {
         dialog.show();
     }
 
+    private void showThemeDropdownDialog(final int[] selectedTheme,
+                                         final GradientDrawable previewDot,
+                                         final TextView previewText) {
+        final Dialog listDialog = new Dialog(this);
+        listDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        list.setPadding(dp(10), dp(10), dp(10), dp(10));
+        list.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(COLOR_CARD);
+        bg.setCornerRadius(dp(16));
+        bg.setStroke(dp(1), COLOR_DIVIDER);
+        list.setBackground(bg);
+
+        for (int i = 0; i < THEME_NAMES.length; i++) {
+            final int idx = i;
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(14), 0, dp(14), 0);
+
+            if (idx == selectedTheme[0]) {
+                GradientDrawable selBg = new GradientDrawable();
+                selBg.setColor(THEME_ACCENT[idx]);
+                selBg.setCornerRadius(dp(10));
+                row.setBackground(selBg);
+            }
+
+            View dot = new View(this);
+            GradientDrawable dBg = new GradientDrawable();
+            dBg.setShape(GradientDrawable.OVAL);
+            dBg.setColor(THEME_PRIMARY[idx]);
+            dot.setBackground(dBg);
+            LinearLayout.LayoutParams dLp = new LinearLayout.LayoutParams(dp(20), dp(20));
+            dLp.leftMargin = dp(12);
+            row.addView(dot, dLp);
+
+            TextView tv = new TextView(this);
+            tv.setText(THEME_NAMES[idx]);
+            tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            tv.setTextColor(idx == selectedTheme[0] ? THEME_PRIMARY[idx] : COLOR_TEXT_MAIN);
+            tv.setIncludeFontPadding(false);
+            tv.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
+            tv.setTypeface(getFontTypeface(fontIndex, idx == selectedTheme[0]));
+            row.addView(tv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            if (idx == selectedTheme[0]) {
+                TextView check = new TextView(this);
+                check.setText("✓");
+                check.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+                check.setTextColor(THEME_PRIMARY[idx]);
+                check.setTypeface(Typeface.DEFAULT_BOLD);
+                row.addView(check);
+            }
+
+            row.setOnClickListener(v -> {
+                selectedTheme[0] = idx;
+                previewDot.setColor(THEME_PRIMARY[idx]);
+                previewText.setText(THEME_NAMES[idx]);
+                listDialog.dismiss();
+            });
+
+            list.addView(row, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(46)));
+        }
+
+        scroll.addView(list);
+        listDialog.setContentView(scroll);
+        if (listDialog.getWindow() != null) {
+            listDialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+            listDialog.getWindow().setLayout(
+                    (int) (getResources().getDisplayMetrics().widthPixels * 0.86),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        listDialog.show();
+    }
+
+    private void showFontDropdownDialog(final int[] selectedFont, final TextView previewText) {
+        final Dialog listDialog = new Dialog(this);
+        listDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        list.setPadding(dp(10), dp(8), dp(10), dp(8));
+        list.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(COLOR_CARD);
+        bg.setCornerRadius(dp(16));
+        bg.setStroke(dp(1), COLOR_DIVIDER);
+        list.setBackground(bg);
+
+        for (int i = 0; i < FONT_NAMES.length; i++) {
+            final int idx = i;
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(14), 0, dp(14), 0);
+
+            if (idx == selectedFont[0]) {
+                GradientDrawable selBg = new GradientDrawable();
+                selBg.setColor(themeAccent);
+                selBg.setCornerRadius(dp(10));
+                row.setBackground(selBg);
+            }
+
+            TextView tv = new TextView(this);
+            tv.setText(FONT_NAMES[idx]);
+            tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            tv.setTextColor(idx == selectedFont[0] ? themePrimary : COLOR_TEXT_MAIN);
+            tv.setIncludeFontPadding(false);
+            tv.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
+            tv.setTypeface(getFontTypeface(idx, idx == selectedFont[0]));
+            row.addView(tv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            if (idx == selectedFont[0]) {
+                TextView check = new TextView(this);
+                check.setText("✓");
+                check.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+                check.setTextColor(themePrimary);
+                check.setTypeface(Typeface.DEFAULT_BOLD);
+                row.addView(check);
+            }
+
+            row.setOnClickListener(v -> {
+                selectedFont[0] = idx;
+                previewText.setText(FONT_NAMES[idx]);
+                previewText.setTypeface(getFontTypeface(idx, false));
+                listDialog.dismiss();
+            });
+
+            list.addView(row, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(48)));
+        }
+
+        scroll.addView(list);
+        listDialog.setContentView(scroll);
+        if (listDialog.getWindow() != null) {
+            listDialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+            listDialog.getWindow().setLayout(
+                    (int) (getResources().getDisplayMetrics().widthPixels * 0.88),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        listDialog.show();
+    }
+
     private void openFolderPicker() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
@@ -2059,6 +2228,9 @@ public class MainActivity extends Activity {
         btn.setAllCaps(false);
         btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         btn.setTextColor(Color.WHITE);
+        btn.setGravity(Gravity.CENTER);
+        btn.setIncludeFontPadding(false);
+        btn.setPadding(dp(12), 0, dp(12), 0);
         btn.setTypeface(getFontTypeface(fontIndex, true));
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(themePrimary);
@@ -2073,6 +2245,9 @@ public class MainActivity extends Activity {
         btn.setAllCaps(false);
         btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         btn.setTextColor(themePrimary);
+        btn.setGravity(Gravity.CENTER);
+        btn.setIncludeFontPadding(false);
+        btn.setPadding(dp(12), 0, dp(12), 0);
         btn.setTypeface(getFontTypeface(fontIndex, true));
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(themeAccent);
