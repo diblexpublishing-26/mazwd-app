@@ -1,3 +1,5 @@
+package com.mazwd.app;
+
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
@@ -1118,7 +1120,7 @@ public class MainActivity extends Activity {
         root.addView(statsTextView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        // 5. Bottom Read Action Bar (Dignified Edit + Share buttons without childish emojis)
+        // 5. Bottom Read Action Bar (Dignified Edit + Share buttons without emojis)
         if (currentMode == Mode.READ) {
             LinearLayout readBottomBar = new LinearLayout(this);
             readBottomBar.setOrientation(LinearLayout.HORIZONTAL);
@@ -1836,7 +1838,7 @@ public class MainActivity extends Activity {
         final int[] selectedTheme = {themeIndex};
         final int[] selectedFont = {fontIndex};
 
-        // 1. Color Theme Dropdown Box (Single box that opens the 8 themes list on tap)
+        // 1. Color Theme Dropdown Box
         TextView themeLabel = new TextView(this);
         themeLabel.setText("لون المظهر (8 ثيمات):");
         themeLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
@@ -1887,7 +1889,7 @@ public class MainActivity extends Activity {
         tbBoxLp.bottomMargin = dp(14);
         root.addView(themeBox, tbBoxLp);
 
-        // 2. Font Selection Dropdown Box (Single box that opens the 7 fonts list with zero top gap)
+        // 2. Font Selection Dropdown Box
         TextView fontLabel = new TextView(this);
         fontLabel.setText("نوع الخط:");
         fontLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
@@ -1931,7 +1933,7 @@ public class MainActivity extends Activity {
         fnBoxLp.bottomMargin = dp(14);
         root.addView(fontBox, fnBoxLp);
 
-        // 3. Toolbar Display Style (Text vs Icons) + Customize Button
+        // 3. Toolbar Display Style
         TextView tbLabel = new TextView(this);
         tbLabel.setText("شريط أدوات التحرير:");
         tbLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
