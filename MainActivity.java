@@ -1,7 +1,6 @@
 package com.mazwd.app;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.app.Dialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -105,6 +104,7 @@ public class MainActivity extends Activity {
     private final Map<String, String> contentCache = new HashMap<>();
     private NoteFile currentFile = null;
     private String currentSearchQuery = "";
+    private int savedHomeScrollY = 0;
 
     private final ArrayList<String> undoStack = new ArrayList<>();
     private int undoIndex = -1;
@@ -112,12 +112,14 @@ public class MainActivity extends Activity {
     private boolean isDirty = false;
 
     private FrameLayout rootContainer;
+    private ScrollView homeScrollView;
     private EditText editorEditText;
     private TextView readTextView;
     private ScrollView readScrollView;
     private TextView docTitleView;
     private TextView statsBarView;
     private TextView zoomPercentView;
+    private HorizontalScrollView editorToolbarScroll;
     private LinearLayout editorToolbarContainer;
     private LinearLayout readActionBar;
     private LinearLayout homeFilesContainer;
@@ -145,24 +147,29 @@ public class MainActivity extends Activity {
             {"الأخضر الزمردي", "#065F46", "#064E3B", "#D1FAE5"},
             {"العنابي الفاخر", "#881337", "#4C0519", "#FFE4E6"},
             {"البني التراثي", "#78350F", "#451A03", "#FEF3C7"},
-            {"الطيني الحضرمي", "#9A3412", "#431407", "#FFEDD5"},
+            {"البترولي العصري", "#0F4C5C", "#082F3A", "#CCFBF1"},
             {"البنفسجي الأنيق", "#5B21B6", "#2E1065", "#EDE9FE"},
             {"الرمادي الرسمي", "#334155", "#0F172A", "#E2E8F0"},
             {"التركواز الهادئ", "#115E59", "#042F2E", "#CCFBF1"}
     };
 
-    // 7 Selectable Fonts
+    // 12 Selectable Fonts (7 original + 5 new open-source Arabic fonts)
     private static final String[] FONT_NAMES = {
             "Sans — خط واضح وعصري (افتراضي)",
             "تجوال — خط حديث وأنيق للمقالات",
             "المراعي — خط عربي كلاسيكي مريح ومتوازن",
+            "شهرزاد عريض — خط نسخي تراثي أصيل",
+            "ريدكس برو — خط عصري فائق الوضوح",
+            "نوتو سانس — خط جوجل القياسي المتوازن",
+            "نوتو نسخ — خط نسخي مطبعي للأبحاث",
+            "آي بي إم بليكس — خط تقني حديث وأنيق",
             "عارف رقعة — خط الرقعة العربي",
             "ريم كوفي — خط كوفي حديث ومميز",
             "Serif — خط إنجليزي رسمي ومريح",
             "Cursive — خط فني مائل"
     };
 
-    // 12 Editor Tools (11 original + "find_replace" optional)
+    // 12 Editor Tools
     private static final String[] TOOL_IDS = {
             "undo", "redo", "copy", "paste", "select_all",
             "auto_format", "signature", "cut", "select_up",
@@ -301,33 +308,27 @@ public class MainActivity extends Activity {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 switch (idx) {
-                    case 1: {
-                        String resName = bold ? "tajawal_bold" : "tajawal_regular";
-                        int id = getResources().getIdentifier(resName, "font", getPackageName());
-                        if (id != 0) return getResources().getFont(id);
-                        break;
-                    }
-                    case 2: {
-                        String resName = bold ? "mazwd_arabic_bold" : "mazwd_arabic";
-                        int id = getResources().getIdentifier(resName, "font", getPackageName());
-                        if (id != 0) return getResources().getFont(id);
-                        break;
-                    }
-                    case 3: {
-                        String resName = bold ? "aref_ruqaa_bold" : "aref_ruqaa";
-                        int id = getResources().getIdentifier(resName, "font", getPackageName());
-                        if (id != 0) return getResources().getFont(id);
-                        break;
-                    }
-                    case 4: {
-                        String resName = bold ? "reem_kufi_bold" : "reem_kufi";
-                        int id = getResources().getIdentifier(resName, "font", getPackageName());
-                        if (id != 0) return TypedValueFont(id, style);
-                        break;
-                    }
+                    case 1:
+                        return loadResFont(bold ? "tajawal_bold" : "tajawal_regular", style);
+                    case 2:
+                        return loadResFont(bold ? "mazwd_arabic_bold" : "mazwd_arabic", style);
+                    case 3:
+                        return loadResFont("scheherazade_bold", Typeface.BOLD);
+                    case 4:
+                        return loadResFont(bold ? "readex_pro_bold" : "readex_pro", style);
                     case 5:
-                        return Typeface.create(Typeface.SERIF, style);
+                        return loadResFont(bold ? "noto_sans_arabic_bold" : "noto_sans_arabic", style);
                     case 6:
+                        return loadResFont(bold ? "noto_naskh_arabic_bold" : "noto_naskh_arabic", style);
+                    case 7:
+                        return loadResFont(bold ? "ibm_plex_arabic_bold" : "ibm_plex_arabic", style);
+                    case 8:
+                        return loadResFont(bold ? "aref_ruqaa_bold" : "aref_ruqaa", style);
+                    case 9:
+                        return loadResFont(bold ? "reem_kufi_bold" : "reem_kufi", style);
+                    case 10:
+                        return Typeface.create(Typeface.SERIF, style);
+                    case 11:
                         return Typeface.create("cursive", style);
                     default:
                         return Typeface.create("sans-serif", style);
@@ -338,10 +339,13 @@ public class MainActivity extends Activity {
         return Typeface.create(Typeface.SANS_SERIF, style);
     }
 
-    private Typeface TypedValueFont(int resId, int style) {
+    private Typeface loadResFont(String resName, int style) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Typeface base = getResources().getFont(resId);
-            return Typeface.create(base, style);
+            int id = getResources().getIdentifier(resName, "font", getPackageName());
+            if (id != 0) {
+                Typeface base = getResources().getFont(id);
+                return Typeface.create(base, style);
+            }
         }
         return Typeface.create(Typeface.SANS_SERIF, style);
     }
@@ -412,6 +416,66 @@ public class MainActivity extends Activity {
         return getResources().getIdentifier(name, "drawable", getPackageName());
     }
 
+    // ==================== SMART ARABIC NORMALIZATION & SEARCH ====================
+
+    private boolean isArabicDiacritic(char c) {
+        return (c >= '\u064B' && c <= '\u065F') || c == '\u0670' || c == '\u0640';
+    }
+
+    private char normalizeArabicChar(char c) {
+        if (c == 'أ' || c == 'إ' || c == 'آ' || c == 'ٱ') return 'ا';
+        if (c == 'ة') return 'ه';
+        if (c == 'ى') return 'ي';
+        return Character.toLowerCase(c);
+    }
+
+    private String normalizeForSearch(String s) {
+        if (s == null || s.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (!isArabicDiacritic(c)) {
+                sb.append(normalizeArabicChar(c));
+            }
+        }
+        return sb.toString();
+    }
+
+    private List<int[]> findSmartMatchRanges(String text, String query) {
+        List<int[]> ranges = new ArrayList<>();
+        if (text == null || query == null) return ranges;
+        String normQuery = normalizeForSearch(query.trim());
+        if (normQuery.isEmpty()) return ranges;
+
+        StringBuilder normText = new StringBuilder(text.length());
+        int[] mapToOrig = new int[text.length() + 1];
+        int normLen = 0;
+
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (!isArabicDiacritic(c)) {
+                mapToOrig[normLen] = i;
+                normText.append(normalizeArabicChar(c));
+                normLen++;
+            }
+        }
+        mapToOrig[normLen] = text.length();
+        String normStr = normText.toString();
+
+        int idx = 0;
+        while ((idx = normStr.indexOf(normQuery, idx)) >= 0) {
+            int origStart = mapToOrig[idx];
+            int endNormIdx = idx + normQuery.length() - 1;
+            int origEnd = mapToOrig[endNormIdx] + 1;
+            while (origEnd < text.length() && isArabicDiacritic(text.charAt(origEnd))) {
+                origEnd++;
+            }
+            ranges.add(new int[]{origStart, origEnd});
+            idx += normQuery.length();
+        }
+        return ranges;
+    }
+
     // ==================== 1. HOME SCREEN ====================
 
     private void showHomeScreen(boolean reloadFiles) {
@@ -430,9 +494,10 @@ public class MainActivity extends Activity {
         rootContainer.addView(mainLayout, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        // --- TOP HERO HEADER CARD ---
+        // --- 1. FIXED TOP HERO HEADER CARD (Centered Title & Subtitle) ---
         LinearLayout heroCard = new LinearLayout(this);
         heroCard.setOrientation(LinearLayout.VERTICAL);
+        heroCard.setGravity(Gravity.CENTER_HORIZONTAL);
         GradientDrawable heroBg = new GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
                 new int[]{getDarkHeaderColor(), getPrimaryColor()}
@@ -440,7 +505,7 @@ public class MainActivity extends Activity {
         float r = dp(24);
         heroBg.setCornerRadii(new float[]{0, 0, 0, 0, r, r, r, r});
         heroCard.setBackground(heroBg);
-        heroCard.setPadding(dp(20), dp(22), dp(20), dp(22));
+        heroCard.setPadding(dp(20), dp(20), dp(20), dp(20));
         heroCard.setElevation(dp(6));
 
         TextView titleView = new TextView(this);
@@ -449,8 +514,9 @@ public class MainActivity extends Activity {
         titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 23);
         titleView.setTypeface(getAppTypeface(true));
         titleView.setIncludeFontPadding(false);
-        titleView.setGravity(Gravity.RIGHT);
-        heroCard.addView(titleView);
+        titleView.setGravity(Gravity.CENTER);
+        heroCard.addView(titleView, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView subtitleView = new TextView(this);
         subtitleView.setText("كاتبة وباحثة في التراث الحضرمي");
@@ -458,7 +524,7 @@ public class MainActivity extends Activity {
         subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         subtitleView.setTypeface(getAppTypeface(false));
         subtitleView.setIncludeFontPadding(false);
-        subtitleView.setGravity(Gravity.RIGHT);
+        subtitleView.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         subLp.topMargin = dp(4);
@@ -477,7 +543,18 @@ public class MainActivity extends Activity {
         mainLayout.addView(heroCard, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        // --- SECTION HEADER ("ملفاتي النصية" + "TXT" badge) ---
+        // --- 2. SCROLLABLE AREA ("ملفاتي النصية" + Search Bar + Files List) ---
+        homeScrollView = new ScrollView(this);
+        homeScrollView.setFillViewport(true);
+        homeScrollView.setOnScrollChangeListener((v, scrollX, scrollY, oldScrollX, oldScrollY) -> {
+            savedHomeScrollY = scrollY;
+        });
+
+        LinearLayout scrollContent = new LinearLayout(this);
+        scrollContent.setOrientation(LinearLayout.VERTICAL);
+        scrollContent.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+
+        // Section Header ("ملفاتي النصية" + "TXT" badge)
         LinearLayout sectionHeader = new LinearLayout(this);
         sectionHeader.setOrientation(LinearLayout.HORIZONTAL);
         sectionHeader.setGravity(Gravity.CENTER_VERTICAL);
@@ -502,9 +579,9 @@ public class MainActivity extends Activity {
         txtBadge.setPadding(dp(10), dp(4), dp(10), dp(4));
         sectionHeader.addView(txtBadge);
 
-        mainLayout.addView(sectionHeader);
+        scrollContent.addView(sectionHeader);
 
-        // --- UNIFIED SEARCH BAR ---
+        // Unified Search Bar (scrolls naturally with the list)
         LinearLayout searchBox = new LinearLayout(this);
         searchBox.setOrientation(LinearLayout.HORIZONTAL);
         searchBox.setGravity(Gravity.CENTER_VERTICAL);
@@ -557,21 +634,21 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams siLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
         searchBox.addView(searchInput, siLp);
         searchBox.addView(clearSearchBtn);
-        mainLayout.addView(searchBox, searchBoxLp);
+        scrollContent.addView(searchBox, searchBoxLp);
 
-        // --- SCROLLABLE FILES LIST ---
-        ScrollView filesScroll = new ScrollView(this);
-        filesScroll.setFillViewport(true);
+        // Files List Container
         homeFilesContainer = new LinearLayout(this);
         homeFilesContainer.setOrientation(LinearLayout.VERTICAL);
-        homeFilesContainer.setPadding(dp(16), dp(4), dp(16), dp(16));
-        filesScroll.addView(homeFilesContainer);
+        homeFilesContainer.setPadding(dp(16), dp(4), dp(16), dp(18));
+        scrollContent.addView(homeFilesContainer, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
+        homeScrollView.addView(scrollContent);
         LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
-        mainLayout.addView(filesScroll, scrollLp);
+        mainLayout.addView(homeScrollView, scrollLp);
 
-        // --- BOTTOM BAR (Lifted slightly so bottom rounded corners are 100% visible) ---
+        // --- 3. FIXED BOTTOM BAR (Settings & Backup ZIP) ---
         LinearLayout bottomBar = new LinearLayout(this);
         bottomBar.setOrientation(LinearLayout.HORIZONTAL);
         bottomBar.setGravity(Gravity.CENTER_VERTICAL);
@@ -608,10 +685,14 @@ public class MainActivity extends Activity {
         mainLayout.addView(bottomBar, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
+        final int restoreY = savedHomeScrollY;
         if (reloadFiles) {
             loadFilesFromFolder();
         } else {
             renderHomeFileList();
+        }
+        if (restoreY > 0 && homeScrollView != null) {
+            homeScrollView.post(() -> homeScrollView.scrollTo(0, restoreY));
         }
     }
 
@@ -707,7 +788,7 @@ public class MainActivity extends Activity {
         }
 
         List<NoteFile> filtered = new ArrayList<>();
-        String q = currentSearchQuery.toLowerCase(Locale.ROOT);
+        String q = currentSearchQuery.trim();
 
         for (NoteFile nf : allFiles) {
             nf.matchSnippet = null;
@@ -715,19 +796,20 @@ public class MainActivity extends Activity {
                 filtered.add(nf);
             } else {
                 String cleanName = stripTxtExtension(nf.name);
-                boolean nameMatches = cleanName.toLowerCase(Locale.ROOT).contains(q);
+                boolean nameMatches = !findSmartMatchRanges(cleanName, q).isEmpty();
 
                 if (nf.cachedContent == null) {
                     nf.cachedContent = readFileContent(nf.uri);
                     contentCache.put(nf.uri.toString(), nf.cachedContent);
                 }
                 String body = nf.cachedContent != null ? nf.cachedContent : "";
-                int idx = body.toLowerCase(Locale.ROOT).indexOf(q);
-                boolean contentMatches = idx >= 0;
+                List<int[]> bodyRanges = findSmartMatchRanges(body, q);
+                boolean contentMatches = !bodyRanges.isEmpty();
 
                 if (contentMatches) {
-                    int start = Math.max(0, idx - 30);
-                    int end = Math.min(body.length(), idx + q.length() + 45);
+                    int[] firstMatch = bodyRanges.get(0);
+                    int start = Math.max(0, firstMatch[0] - 30);
+                    int end = Math.min(body.length(), firstMatch[1] + 45);
                     String snippet = body.substring(start, end).replace("\n", " ").trim();
                     if (start > 0) snippet = "..." + snippet;
                     if (end < body.length()) snippet = snippet + "...";
@@ -835,31 +917,32 @@ public class MainActivity extends Activity {
             moreBtn.setOnClickListener(v -> showFileOptionsMenu(nf));
             card.addView(moreBtn, moreLp);
 
-            card.setOnClickListener(v -> openNoteFile(nf, ScreenState.READ));
+            card.setOnClickListener(v -> {
+                if (homeScrollView != null) {
+                    savedHomeScrollY = homeScrollView.getScrollY();
+                }
+                openNoteFile(nf, ScreenState.READ);
+            });
             homeFilesContainer.addView(card, cardLp);
         }
     }
 
     private Spannable highlightSearchMatches(String text, String query) {
         SpannableString span = new SpannableString(text);
-        if (query == null || query.isEmpty()) return span;
-        String lowerText = text.toLowerCase(Locale.ROOT);
-        String lowerQuery = query.toLowerCase(Locale.ROOT);
-        int idx = 0;
-        while ((idx = lowerText.indexOf(lowerQuery, idx)) >= 0) {
+        List<int[]> ranges = findSmartMatchRanges(text, query);
+        for (int[] r : ranges) {
             span.setSpan(
                     new BackgroundColorSpan(0xFFFDE047),
-                    idx,
-                    idx + lowerQuery.length(),
+                    r[0],
+                    r[1],
                     Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
             );
             span.setSpan(
                     new ForegroundColorSpan(Color.parseColor("#0F172A")),
-                    idx,
-                    idx + lowerQuery.length(),
+                    r[0],
+                    r[1],
                     Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
             );
-            idx += lowerQuery.length();
         }
         return span;
     }
@@ -965,20 +1048,20 @@ public class MainActivity extends Activity {
 
         docLayout.addView(topBar);
 
-        // --- 2. EDITOR TOOLBAR (Visible in EDIT mode) ---
-        HorizontalScrollView toolbarScroll = new HorizontalScrollView(this);
-        toolbarScroll.setHorizontalScrollBarEnabled(false);
-        toolbarScroll.setBackgroundColor(getCardBgColor());
-        toolbarScroll.setElevation(dp(2));
+        // --- 2. EDITOR TOOLBAR (Visible in EDIT mode if enabled in Settings) ---
+        editorToolbarScroll = new HorizontalScrollView(this);
+        editorToolbarScroll.setHorizontalScrollBarEnabled(false);
+        editorToolbarScroll.setBackgroundColor(getCardBgColor());
+        editorToolbarScroll.setElevation(dp(2));
 
         editorToolbarContainer = new LinearLayout(this);
         editorToolbarContainer.setOrientation(LinearLayout.HORIZONTAL);
         editorToolbarContainer.setGravity(Gravity.CENTER_VERTICAL);
         editorToolbarContainer.setPadding(dp(8), dp(6), dp(8), dp(6));
-        toolbarScroll.addView(editorToolbarContainer);
+        editorToolbarScroll.addView(editorToolbarContainer);
         populateEditorToolbar();
 
-        docLayout.addView(toolbarScroll, new LinearLayout.LayoutParams(
+        docLayout.addView(editorToolbarScroll, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         // --- 3. DOCUMENT PAPER AREA + LEFT SLIDER + QUICK JUMP BUTTON ---
@@ -1103,14 +1186,13 @@ public class MainActivity extends Activity {
         switchDocumentMode(mode);
     }
 
-    // ==================== LEFT FAST SCROLL SLIDER ====================
+    // ==================== LEFT FAST SCROLL SLIDER (INSTANT RESPONSE DURING FLING) ====================
 
     private void buildLeftFastSlider(FrameLayout paperCard) {
         sliderTouchContainer = new FrameLayout(this);
         sliderTouchContainer.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
         sliderTouchContainer.setAlpha(0.38f);
 
-        // Subtle vertical track line
         View trackLine = new View(this);
         trackLine.setBackground(roundedRect(getBorderColor(), 2, 0, 0));
         FrameLayout.LayoutParams trackLp = new FrameLayout.LayoutParams(
@@ -1119,7 +1201,6 @@ public class MainActivity extends Activity {
         trackLp.bottomMargin = dp(14);
         sliderTouchContainer.addView(trackLine, trackLp);
 
-        // Draggable Pill Thumb
         sliderThumb = new View(this);
         sliderThumb.setBackground(roundedRect(getPrimaryColor(), 6, 1, Color.WHITE));
         sliderThumb.setElevation(dp(3));
@@ -1129,10 +1210,9 @@ public class MainActivity extends Activity {
         sliderTouchContainer.addView(sliderThumb, thumbLp);
 
         FrameLayout.LayoutParams containerLp = new FrameLayout.LayoutParams(
-                dp(26), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.LEFT | Gravity.TOP);
+                dp(28), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.LEFT | Gravity.TOP);
         paperCard.addView(sliderTouchContainer, containerLp);
 
-        // Percentage Bubble next to thumb
         sliderBubble = new TextView(this);
         sliderBubble.setText("0%");
         sliderBubble.setTextColor(Color.WHITE);
@@ -1145,7 +1225,7 @@ public class MainActivity extends Activity {
         sliderBubble.setVisibility(View.GONE);
         FrameLayout.LayoutParams bubbleLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.LEFT | Gravity.TOP);
-        bubbleLp.leftMargin = dp(32);
+        bubbleLp.leftMargin = dp(34);
         bubbleLp.topMargin = dp(14);
         paperCard.addView(sliderBubble, bubbleLp);
 
@@ -1159,8 +1239,14 @@ public class MainActivity extends Activity {
             float thumbH = dp(46);
             float usableH = Math.max(1f, v.getHeight() - (2f * pad) - thumbH);
 
+            if (action == MotionEvent.ACTION_DOWN) {
+                // Immediately abort any ongoing fling deceleration on the ScrollView or EditText
+                stopOngoingScrollFling();
+            }
+
             if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_MOVE) {
                 isSliderDragging = true;
+                v.getParent().requestDisallowInterceptTouchEvent(true);
                 sliderFadeHandler.removeCallbacks(sliderFadeRunnable);
                 sliderTouchContainer.setAlpha(1.0f);
 
@@ -1175,7 +1261,6 @@ public class MainActivity extends Activity {
                 }
 
                 scrollDocumentToFraction(fraction);
-                v.getParent().requestDisallowInterceptTouchEvent(true);
                 return true;
             } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                 isSliderDragging = false;
@@ -1205,6 +1290,26 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void stopOngoingScrollFling() {
+        try {
+            if (readScrollView != null && currentScreen == ScreenState.READ) {
+                readScrollView.fling(0);
+                readScrollView.smoothScrollBy(0, 0);
+                long now = android.os.SystemClock.uptimeMillis();
+                MotionEvent cancelFling = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, 0f, 0f, 0);
+                readScrollView.onTouchEvent(cancelFling);
+                MotionEvent upFling = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0);
+                readScrollView.onTouchEvent(upFling);
+                cancelFling.recycle();
+                upFling.recycle();
+            } else if (editorEditText != null && currentScreen == ScreenState.EDIT) {
+                editorEditText.cancelPendingInputEvents();
+                editorEditText.scrollBy(0, 0);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
     private int getReadMaxScroll() {
         if (readScrollView == null || readTextView == null) return 0;
         return Math.max(0, readTextView.getHeight() - readScrollView.getHeight());
@@ -1218,11 +1323,22 @@ public class MainActivity extends Activity {
         return Math.max(0, totalH - editorEditText.getHeight());
     }
 
+    private float getCurrentDocumentScrollFraction() {
+        if (currentScreen == ScreenState.READ && readScrollView != null) {
+            int max = getReadMaxScroll();
+            return max > 0 ? Math.max(0f, Math.min(1f, (float) readScrollView.getScrollY() / max)) : 0f;
+        } else if (currentScreen == ScreenState.EDIT && editorEditText != null) {
+            int max = getEditorMaxScroll();
+            return max > 0 ? Math.max(0f, Math.min(1f, (float) editorEditText.getScrollY() / max)) : 0f;
+        }
+        return 0f;
+    }
+
     private void scrollDocumentToFraction(float fraction) {
-        if (currentScreen == ScreenState.READ) {
+        if (currentScreen == ScreenState.READ && readScrollView != null) {
             int max = getReadMaxScroll();
             readScrollView.scrollTo(0, Math.round(fraction * max));
-        } else if (currentScreen == ScreenState.EDIT) {
+        } else if (currentScreen == ScreenState.EDIT && editorEditText != null) {
             int max = getEditorMaxScroll();
             editorEditText.scrollTo(0, Math.round(fraction * max));
         }
@@ -1234,16 +1350,7 @@ public class MainActivity extends Activity {
 
         sliderTouchContainer.post(() -> {
             if (isSliderDragging) return;
-            int max;
-            int cur;
-            if (currentScreen == ScreenState.READ) {
-                max = getReadMaxScroll();
-                cur = readScrollView != null ? readScrollView.getScrollY() : 0;
-            } else {
-                max = getEditorMaxScroll();
-                cur = editorEditText != null ? editorEditText.getScrollY() : 0;
-            }
-            float fraction = max > 0 ? Math.max(0f, Math.min(1f, (float) cur / max)) : 0f;
+            float fraction = getCurrentDocumentScrollFraction();
             float pad = dp(14);
             float thumbH = dp(46);
             float usableH = Math.max(1f, sliderTouchContainer.getHeight() - (2f * pad) - thumbH);
@@ -1258,7 +1365,6 @@ public class MainActivity extends Activity {
     // ==================== QUICK JUMP BUTTON (TOP / BOTTOM LIKE TEXTPAD) ====================
 
     private void buildQuickJumpOverlay(FrameLayout paperCard) {
-        // Floating Mini Menu Card (appears above button when tapped)
         jumpMenuCard = new LinearLayout(this);
         jumpMenuCard.setOrientation(LinearLayout.VERTICAL);
         jumpMenuCard.setBackground(roundedRect(getCardBgColor(), 12, 1, getBorderColor()));
@@ -1304,7 +1410,6 @@ public class MainActivity extends Activity {
         menuLp.bottomMargin = dp(60);
         paperCard.addView(jumpMenuCard, menuLp);
 
-        // Floating Quick Jump Button
         FrameLayout jumpBtnContainer = new FrameLayout(this);
         jumpBtnContainer.setBackground(roundedRect(getSecondaryBtnBgColor(), 20, 1, getBorderColor()));
         jumpBtnContainer.setElevation(dp(4));
@@ -1346,6 +1451,7 @@ public class MainActivity extends Activity {
     }
 
     private void jumpToDocumentTop() {
+        stopOngoingScrollFling();
         if (currentScreen == ScreenState.READ) {
             readScrollView.post(() -> readScrollView.smoothScrollTo(0, 0));
         } else if (currentScreen == ScreenState.EDIT) {
@@ -1356,6 +1462,7 @@ public class MainActivity extends Activity {
     }
 
     private void jumpToDocumentBottom() {
+        stopOngoingScrollFling();
         if (currentScreen == ScreenState.READ) {
             readScrollView.post(() -> {
                 int max = getReadMaxScroll();
@@ -1373,6 +1480,8 @@ public class MainActivity extends Activity {
     }
 
     private void switchDocumentMode(ScreenState mode) {
+        final float prevScrollFraction = getCurrentDocumentScrollFraction();
+        final boolean isModeSwitch = (currentScreen != mode);
         currentScreen = mode;
         String currentText = editorEditText.getText().toString();
         if (jumpMenuCard != null) jumpMenuCard.setVisibility(View.GONE);
@@ -1380,30 +1489,47 @@ public class MainActivity extends Activity {
         if (mode == ScreenState.READ) {
             saveCurrentFileImmediately(false);
             hideKeyboard();
-            ((View) editorToolbarContainer.getParent()).setVisibility(View.GONE);
+            editorToolbarScroll.setVisibility(View.GONE);
             editorEditText.setVisibility(View.GONE);
             readScrollView.setVisibility(View.VISIBLE);
             readActionBar.setVisibility(View.VISIBLE);
 
             if (!currentSearchQuery.isEmpty()) {
                 readTextView.setText(highlightSearchMatches(currentText, currentSearchQuery));
-                scrollToFirstMatchInReadMode(currentText, currentSearchQuery);
+                if (!isModeSwitch) {
+                    scrollToFirstMatchInReadMode(currentText, currentSearchQuery);
+                } else {
+                    readScrollView.post(() -> {
+                        scrollDocumentToFraction(prevScrollFraction);
+                        updateSliderPositionFromScroll();
+                    });
+                }
             } else {
                 readTextView.setText(currentText);
+                readScrollView.post(() -> {
+                    scrollDocumentToFraction(prevScrollFraction);
+                    updateSliderPositionFromScroll();
+                });
             }
         } else {
-            ((View) editorToolbarContainer.getParent()).setVisibility(View.VISIBLE);
+            boolean showToolbar = prefs.getBoolean("show_editor_toolbar", true);
+            editorToolbarScroll.setVisibility(showToolbar ? View.VISIBLE : View.GONE);
             readScrollView.setVisibility(View.GONE);
             readActionBar.setVisibility(View.GONE);
             editorEditText.setVisibility(View.VISIBLE);
             editorEditText.requestFocus();
+            editorEditText.post(() -> {
+                scrollDocumentToFraction(prevScrollFraction);
+                updateSliderPositionFromScroll();
+            });
         }
         updateSliderPositionFromScroll();
     }
 
     private void scrollToFirstMatchInReadMode(String text, String query) {
-        int idx = text.toLowerCase(Locale.ROOT).indexOf(query.toLowerCase(Locale.ROOT));
-        if (idx < 0) return;
+        List<int[]> matches = findSmartMatchRanges(text, query);
+        if (matches.isEmpty()) return;
+        final int idx = matches.get(0)[0];
         readTextView.post(() -> {
             Layout layout = readTextView.getLayout();
             if (layout != null) {
@@ -1424,12 +1550,59 @@ public class MainActivity extends Activity {
     }
 
     private void showResetZoomDialog() {
-        AlertDialog.Builder b = new AlertDialog.Builder(this);
-        b.setTitle("حجم النص (" + getZoomPercent() + "%)");
-        b.setMessage("هل تريد إعادة حجم النص إلى الحجم الافتراضي (100%)؟");
-        b.setPositiveButton("إعادة لـ 100%", (d, w) -> setZoomPercent(100));
-        b.setNegativeButton("إلغاء", null);
-        b.show();
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        root.setBackground(roundedRect(getCardBgColor(), 18, 1, getBorderColor()));
+        root.setPadding(dp(20), dp(18), dp(20), dp(16));
+
+        TextView title = new TextView(this);
+        title.setText("حجم النص (" + getZoomPercent() + "%)");
+        title.setTextColor(getAccentTextColor());
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        title.setTypeface(getAppTypeface(true));
+        title.setGravity(Gravity.RIGHT);
+        root.addView(title);
+
+        TextView msg = new TextView(this);
+        msg.setText("هل تريد إعادة حجم النص إلى الحجم الافتراضي (100%)؟");
+        msg.setTextColor(getTextPrimaryColor());
+        msg.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);
+        msg.setTypeface(getAppTypeface(false));
+        msg.setGravity(Gravity.RIGHT);
+        LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        mLp.topMargin = dp(8);
+        mLp.bottomMargin = dp(16);
+        root.addView(msg, mLp);
+
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(LinearLayout.HORIZONTAL);
+
+        Button confirmBtn = new Button(this);
+        configureTextButton(confirmBtn, "إعادة لـ 100%", 14, true, Color.WHITE, 44);
+        confirmBtn.setBackground(roundedRect(getPrimaryColor(), 10, 0, 0));
+        confirmBtn.setOnClickListener(v -> {
+            setZoomPercent(100);
+            dialog.dismiss();
+        });
+        LinearLayout.LayoutParams b1Lp = new LinearLayout.LayoutParams(0, dp(44), 1.2f);
+        b1Lp.leftMargin = dp(6);
+        btnRow.addView(confirmBtn, b1Lp);
+
+        Button cancelBtn = new Button(this);
+        configureTextButton(cancelBtn, "إلغاء", 14, true, getTextPrimaryColor(), 44);
+        cancelBtn.setBackground(roundedRect(getSecondaryBtnBgColor(), 10, 1, getBorderColor()));
+        cancelBtn.setOnClickListener(v -> dialog.dismiss());
+        LinearLayout.LayoutParams b2Lp = new LinearLayout.LayoutParams(0, dp(44), 1f);
+        b2Lp.rightMargin = dp(6);
+        btnRow.addView(cancelBtn, b2Lp);
+
+        root.addView(btnRow);
+        showStyledDialog(dialog, root, 0.88f, ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
     // ==================== 3. EDITOR TOOLBAR & FIND/REPLACE ====================
@@ -1483,6 +1656,11 @@ public class MainActivity extends Activity {
     private void populateEditorToolbar() {
         if (editorToolbarContainer == null) return;
         editorToolbarContainer.removeAllViews();
+
+        if (editorToolbarScroll != null && currentScreen == ScreenState.EDIT) {
+            boolean showToolbar = prefs.getBoolean("show_editor_toolbar", true);
+            editorToolbarScroll.setVisibility(showToolbar ? View.VISIBLE : View.GONE);
+        }
 
         List<String> ordered = getOrderedToolList();
         Set<String> enabled = getEnabledToolsSet();
@@ -1709,7 +1887,7 @@ public class MainActivity extends Activity {
                     return;
                 }
                 String full = editorEditText.getText().toString();
-                int matches = countOccurrences(full, q);
+                int matches = findSmartMatchRanges(full, q).size();
                 countLabel.setText("عدد التطابقات في المستند: " + matches);
             }
             @Override public void afterTextChanged(Editable s) {}
@@ -1726,18 +1904,22 @@ public class MainActivity extends Activity {
             String q = findInput.getText().toString();
             if (q.isEmpty()) return;
             String text = editorEditText.getText().toString();
-            int from = Math.max(0, editorEditText.getSelectionEnd());
-            int idx = text.indexOf(q, from);
-            if (idx < 0 && from > 0) {
-                idx = text.indexOf(q, 0);
-            }
-            if (idx >= 0) {
-                editorEditText.requestFocus();
-                editorEditText.setSelection(idx, idx + q.length());
-                Toast.makeText(this, "تم تحديد الكلمة في النص", Toast.LENGTH_SHORT).show();
-            } else {
+            List<int[]> matches = findSmartMatchRanges(text, q);
+            if (matches.isEmpty()) {
                 Toast.makeText(this, "لم يتم العثور على الكلمة", Toast.LENGTH_SHORT).show();
+                return;
             }
+            int from = Math.max(0, editorEditText.getSelectionEnd());
+            int[] chosen = matches.get(0);
+            for (int[] r : matches) {
+                if (r[0] >= from) {
+                    chosen = r;
+                    break;
+                }
+            }
+            editorEditText.requestFocus();
+            editorEditText.setSelection(chosen[0], chosen[1]);
+            Toast.makeText(this, "تم تحديد الكلمة في النص", Toast.LENGTH_SHORT).show();
         });
         LinearLayout.LayoutParams fnLp = new LinearLayout.LayoutParams(0, dp(42), 1f);
         fnLp.leftMargin = dp(6);
@@ -1754,15 +1936,23 @@ public class MainActivity extends Activity {
                 return;
             }
             String current = editorEditText.getText().toString();
-            int matches = countOccurrences(current, q);
-            if (matches == 0) {
+            List<int[]> matches = findSmartMatchRanges(current, q);
+            if (matches.isEmpty()) {
                 Toast.makeText(this, "لا توجد تطابقات لاستبدالها", Toast.LENGTH_SHORT).show();
                 return;
             }
-            String updated = current.replace(q, rep);
+            StringBuilder sb = new StringBuilder();
+            int lastEnd = 0;
+            for (int[] r : matches) {
+                sb.append(current, lastEnd, r[0]);
+                sb.append(rep);
+                lastEnd = r[1];
+            }
+            sb.append(current.substring(lastEnd));
+            String updated = sb.toString();
             editorEditText.setText(updated);
             editorEditText.setSelection(updated.length());
-            Toast.makeText(this, "تم استبدال " + matches + " موضع بنجاح", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "تم استبدال " + matches.size() + " موضع بنجاح", Toast.LENGTH_SHORT).show();
             dialog.dismiss();
         });
         LinearLayout.LayoutParams raLp = new LinearLayout.LayoutParams(0, dp(42), 1f);
@@ -1780,48 +1970,71 @@ public class MainActivity extends Activity {
         cbLp.topMargin = dp(8);
         root.addView(closeBtn, cbLp);
 
-        dialog.setContentView(root);
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            dialog.getWindow().setLayout(
-                    (int) (getResources().getDisplayMetrics().widthPixels * 0.90),
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-            );
-        }
-        dialog.show();
-    }
-
-    private int countOccurrences(String text, String target) {
-        if (text == null || target == null || target.isEmpty()) return 0;
-        int count = 0;
-        int idx = 0;
-        while ((idx = text.indexOf(target, idx)) >= 0) {
-            count++;
-            idx += target.length();
-        }
-        return count;
+        showStyledDialog(dialog, root, 0.90f, ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
     private void showQuickSetSignatureDialog() {
-        AlertDialog.Builder b = new AlertDialog.Builder(this);
-        b.setTitle("إعداد التوقيع الشخصي");
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        root.setBackground(roundedRect(getCardBgColor(), 18, 1, getBorderColor()));
+        root.setPadding(dp(20), dp(18), dp(20), dp(16));
+
+        TextView title = new TextView(this);
+        title.setText("إعداد التوقيع الشخصي");
+        title.setTextColor(getAccentTextColor());
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        title.setTypeface(getAppTypeface(true));
+        title.setGravity(Gravity.RIGHT);
+        root.addView(title);
 
         EditText input = new EditText(this);
         input.setHint(SIGNATURE_HINT);
+        input.setHintTextColor(getTextSecondaryColor());
+        input.setTextColor(getTextPrimaryColor());
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         input.setGravity(Gravity.RIGHT | Gravity.TOP);
         input.setTypeface(getAppTypeface(false));
-        input.setPadding(dp(16), dp(14), dp(16), dp(14));
-        b.setView(input);
+        input.setMinLines(2);
+        input.setBackground(roundedRect(getInputBgColor(), 10, 1, getBorderColor()));
+        input.setPadding(dp(14), dp(12), dp(14), dp(12));
+        LinearLayout.LayoutParams inLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        inLp.topMargin = dp(12);
+        inLp.bottomMargin = dp(16);
+        root.addView(input, inLp);
 
-        b.setPositiveButton("حفظ وإدراج", (d, w) -> {
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(LinearLayout.HORIZONTAL);
+
+        Button saveBtn = new Button(this);
+        configureTextButton(saveBtn, "حفظ وإدراج", 14, true, Color.WHITE, 44);
+        saveBtn.setBackground(roundedRect(getPrimaryColor(), 10, 0, 0));
+        saveBtn.setOnClickListener(v -> {
             String newSig = input.getText().toString().trim();
             prefs.edit().putString("custom_signature", newSig).apply();
+            dialog.dismiss();
             if (!newSig.isEmpty()) {
                 executeEditorTool("signature");
             }
         });
-        b.setNegativeButton("إلغاء", null);
-        b.show();
+        LinearLayout.LayoutParams b1Lp = new LinearLayout.LayoutParams(0, dp(44), 1.2f);
+        b1Lp.leftMargin = dp(6);
+        btnRow.addView(saveBtn, b1Lp);
+
+        Button cancelBtn = new Button(this);
+        configureTextButton(cancelBtn, "إلغاء", 14, true, getTextPrimaryColor(), 44);
+        cancelBtn.setBackground(roundedRect(getSecondaryBtnBgColor(), 10, 1, getBorderColor()));
+        cancelBtn.setOnClickListener(v -> dialog.dismiss());
+        LinearLayout.LayoutParams b2Lp = new LinearLayout.LayoutParams(0, dp(44), 1f);
+        b2Lp.rightMargin = dp(6);
+        btnRow.addView(cancelBtn, b2Lp);
+
+        root.addView(btnRow);
+        showStyledDialog(dialog, root, 0.90f, ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
     private String autoFormatArabicText(String input) {
@@ -1864,7 +2077,7 @@ public class MainActivity extends Activity {
         undoIndex = undoStack.size() - 1;
     }
 
-    // ==================== 4. ORGANIZED SETTINGS DIALOG ====================
+    // ==================== 4. ORGANIZED SETTINGS DIALOG WITH MODERN SWITCHES ====================
 
     private void showSettingsDialog() {
         Dialog dialog = new Dialog(this);
@@ -1908,9 +2121,8 @@ public class MainActivity extends Activity {
         // ========== CARD 1: المظهر والخطوط ==========
         LinearLayout appearanceCard = createSettingsSectionCard("المظهر والخطوط");
 
-        // Dark Mode Toggle
-        CheckBox darkModeCheck = createSettingsCheckRow(
-                "تفعيل الوضع الليلي المريح للعين (Dark Mode)",
+        appearanceCard.addView(createSettingsSwitchRow(
+                "الوضع الليلي المريح للعين (Dark Mode)",
                 isDarkMode(),
                 isChecked -> {
                     prefs.edit().putBoolean("dark_mode", isChecked).apply();
@@ -1918,10 +2130,8 @@ public class MainActivity extends Activity {
                     showHomeScreen(false);
                     showSettingsDialog();
                 }
-        );
-        appearanceCard.addView(darkModeCheck);
+        ));
 
-        // Theme Selector Dropdown
         TextView themeLabel = createSettingsLabel("ثيم الألوان:");
         appearanceCard.addView(themeLabel);
 
@@ -1956,7 +2166,6 @@ public class MainActivity extends Activity {
         themeSelectBox.setOnClickListener(v -> showThemeDropdownDialog(dialog));
         appearanceCard.addView(themeSelectBox);
 
-        // Font Selector Dropdown
         TextView fontLabel = createSettingsLabel("نوع الخط:");
         appearanceCard.addView(fontLabel);
 
@@ -1990,33 +2199,32 @@ public class MainActivity extends Activity {
         // ========== CARD 2: خيارات شاشة القراءة والتحرير ==========
         LinearLayout editorOptionsCard = createSettingsSectionCard("خيارات شاشة القراءة والتحرير");
 
-        CheckBox fastSliderCheck = createSettingsCheckRow(
+        editorOptionsCard.addView(createSettingsSwitchRow(
                 "إظهار شريط التمرير السريع الجانبي (يسار الشاشة)",
                 prefs.getBoolean("show_fast_slider", true),
                 isChecked -> prefs.edit().putBoolean("show_fast_slider", isChecked).apply()
-        );
-        editorOptionsCard.addView(fastSliderCheck);
+        ));
 
-        CheckBox jumpBtnCheck = createSettingsCheckRow(
+        editorOptionsCard.addView(createSettingsSwitchRow(
                 "إظهار زر الانتقال السريع (لأول وآخر المستند)",
                 prefs.getBoolean("show_jump_btn", true),
                 isChecked -> prefs.edit().putBoolean("show_jump_btn", isChecked).apply()
-        );
-        editorOptionsCard.addView(jumpBtnCheck);
+        ));
 
-        CheckBox statsBarCheck = createSettingsCheckRow(
+        editorOptionsCard.addView(createSettingsSwitchRow(
                 "إظهار شريط إحصائيات النص (الكلمات والحروف والأسطر)",
                 prefs.getBoolean("show_stats_bar", true),
                 isChecked -> prefs.edit().putBoolean("show_stats_bar", isChecked).apply()
-        );
-        editorOptionsCard.addView(statsBarCheck);
+        ));
 
-        CheckBox iconsOnlyCheck = createSettingsCheckRow(
-                "عرض شريط الأدوات كرموز فقط (بدلاً من النص)",
-                prefs.getBoolean("toolbar_icons_only", false),
-                isChecked -> prefs.edit().putBoolean("toolbar_icons_only", isChecked).apply()
-        );
-        editorOptionsCard.addView(iconsOnlyCheck);
+        editorOptionsCard.addView(createSettingsSwitchRow(
+                "إظهار شريط أدوات التحرير أعلى الورقة",
+                prefs.getBoolean("show_editor_toolbar", true),
+                isChecked -> prefs.edit().putBoolean("show_editor_toolbar", isChecked).apply()
+        ));
+
+        // Segmented Control: [ نصوص | رموز ]
+        editorOptionsCard.addView(createToolbarModeSegmentedRow(null));
 
         Button customizeToolbarBtn = new Button(this);
         configureTextButton(customizeToolbarBtn, "🛠  تخصيص وترتيب أدوات التحرير", 14, true, getAccentTextColor(), 44);
@@ -2024,7 +2232,7 @@ public class MainActivity extends Activity {
         customizeToolbarBtn.setOnClickListener(v -> showToolbarCustomizationDialog());
         LinearLayout.LayoutParams ctbLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(44));
-        ctbLp.topMargin = dp(8);
+        ctbLp.topMargin = dp(10);
         editorOptionsCard.addView(customizeToolbarBtn, ctbLp);
 
         content.addView(editorOptionsCard);
@@ -2094,15 +2302,7 @@ public class MainActivity extends Activity {
         });
         root.addView(closeBtn, clLp);
 
-        dialog.setContentView(root);
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            dialog.getWindow().setLayout(
-                    (int) (getResources().getDisplayMetrics().widthPixels * 0.93),
-                    (int) (getResources().getDisplayMetrics().heightPixels * 0.86)
-            );
-        }
-        dialog.show();
+        showStyledDialog(dialog, root, 0.93f, (int) (getResources().getDisplayMetrics().heightPixels * 0.86));
     }
 
     private LinearLayout createSettingsSectionCard(String sectionTitle) {
@@ -2141,16 +2341,139 @@ public class MainActivity extends Activity {
         void onChanged(boolean isChecked);
     }
 
-    private CheckBox createSettingsCheckRow(String label, boolean checked, OnCheckChange listener) {
-        CheckBox cb = new CheckBox(this);
-        cb.setText("  " + label);
-        cb.setTextColor(getTextPrimaryColor());
-        cb.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
-        cb.setTypeface(getAppTypeface(false));
-        cb.setChecked(checked);
-        cb.setPadding(dp(4), dp(6), dp(4), dp(6));
-        cb.setOnCheckedChangeListener((buttonView, isChecked) -> listener.onChanged(isChecked));
-        return cb;
+    // Modern Illuminated Sliding Circle Switch Row
+    private View createSettingsSwitchRow(String label, boolean initialChecked, OnCheckChange listener) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        row.setPadding(dp(4), dp(9), dp(4), dp(9));
+
+        TextView tv = new TextView(this);
+        tv.setText(label);
+        tv.setTextColor(getTextPrimaryColor());
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
+        tv.setTypeface(getAppTypeface(false));
+        tv.setIncludeFontPadding(false);
+        tv.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams tvLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        tvLp.leftMargin = dp(10);
+        row.addView(tv, tvLp);
+
+        final boolean[] state = new boolean[]{initialChecked};
+        FrameLayout switchTrack = new FrameLayout(this);
+        switchTrack.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
+
+        View thumbCircle = new View(this);
+        GradientDrawable thumbBg = new GradientDrawable();
+        thumbBg.setShape(GradientDrawable.OVAL);
+        thumbBg.setColor(Color.WHITE);
+        thumbCircle.setBackground(thumbBg);
+        thumbCircle.setElevation(dp(2));
+
+        FrameLayout.LayoutParams thumbLp = new FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        thumbLp.leftMargin = dp(3);
+        switchTrack.addView(thumbCircle, thumbLp);
+
+        int offColor = isDarkMode() ? Color.parseColor("#475569") : Color.parseColor("#CBD5E1");
+        float travelPx = dp(22);
+
+        Runnable applyVisualState = () -> {
+            int trackColor = state[0] ? getPrimaryColor() : offColor;
+            switchTrack.setBackground(roundedRect(trackColor, 14, 0, 0));
+            thumbCircle.animate().translationX(state[0] ? travelPx : 0f).setDuration(160).start();
+        };
+        int initTrackColor = state[0] ? getPrimaryColor() : offColor;
+        switchTrack.setBackground(roundedRect(initTrackColor, 14, 0, 0));
+        thumbCircle.setTranslationX(state[0] ? travelPx : 0f);
+
+        row.setOnClickListener(v -> {
+            state[0] = !state[0];
+            applyVisualState.run();
+            listener.onChanged(state[0]);
+        });
+
+        row.addView(switchTrack, new LinearLayout.LayoutParams(dp(48), dp(26)));
+        return row;
+    }
+
+    // Modern Segmented Control: [ نصوص | رموز ]
+    private View createToolbarModeSegmentedRow(Runnable onModeChangedCallback) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        row.setPadding(dp(4), dp(8), dp(4), dp(6));
+
+        TextView label = new TextView(this);
+        label.setText("شكل عرض الأدوات:");
+        label.setTextColor(getTextPrimaryColor());
+        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
+        label.setTypeface(getAppTypeface(true));
+        label.setIncludeFontPadding(false);
+        label.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams lLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        row.addView(label, lLp);
+
+        LinearLayout segBox = new LinearLayout(this);
+        segBox.setOrientation(LinearLayout.HORIZONTAL);
+        segBox.setBackground(roundedRect(getInputBgColor(), 10, 1, getBorderColor()));
+        segBox.setPadding(dp(3), dp(3), dp(3), dp(3));
+
+        TextView textModeBtn = new TextView(this);
+        textModeBtn.setText("نصوص");
+        textModeBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
+        textModeBtn.setGravity(Gravity.CENTER);
+        textModeBtn.setIncludeFontPadding(false);
+        textModeBtn.setPadding(dp(14), dp(6), dp(14), dp(6));
+
+        TextView iconModeBtn = new TextView(this);
+        iconModeBtn.setText("رموز");
+        iconModeBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
+        iconModeBtn.setGravity(Gravity.CENTER);
+        iconModeBtn.setIncludeFontPadding(false);
+        iconModeBtn.setPadding(dp(14), dp(6), dp(14), dp(6));
+
+        Runnable refreshSegmentUI = () -> {
+            boolean iconsOnly = prefs.getBoolean("toolbar_icons_only", false);
+            if (!iconsOnly) {
+                textModeBtn.setBackground(roundedRect(getPrimaryColor(), 8, 0, 0));
+                textModeBtn.setTextColor(Color.WHITE);
+                textModeBtn.setTypeface(getAppTypeface(true));
+
+                iconModeBtn.setBackgroundColor(Color.TRANSPARENT);
+                iconModeBtn.setTextColor(getTextSecondaryColor());
+                iconModeBtn.setTypeface(getAppTypeface(false));
+            } else {
+                iconModeBtn.setBackground(roundedRect(getPrimaryColor(), 8, 0, 0));
+                iconModeBtn.setTextColor(Color.WHITE);
+                iconModeBtn.setTypeface(getAppTypeface(true));
+
+                textModeBtn.setBackgroundColor(Color.TRANSPARENT);
+                textModeBtn.setTextColor(getTextSecondaryColor());
+                textModeBtn.setTypeface(getAppTypeface(false));
+            }
+        };
+        refreshSegmentUI.run();
+
+        textModeBtn.setOnClickListener(v -> {
+            prefs.edit().putBoolean("toolbar_icons_only", false).apply();
+            refreshSegmentUI.run();
+            if (editorToolbarContainer != null) populateEditorToolbar();
+            if (onModeChangedCallback != null) onModeChangedCallback.run();
+        });
+
+        iconModeBtn.setOnClickListener(v -> {
+            prefs.edit().putBoolean("toolbar_icons_only", true).apply();
+            refreshSegmentUI.run();
+            if (editorToolbarContainer != null) populateEditorToolbar();
+            if (onModeChangedCallback != null) onModeChangedCallback.run();
+        });
+
+        segBox.addView(textModeBtn);
+        segBox.addView(iconModeBtn);
+        row.addView(segBox);
+        return row;
     }
 
     private TextView createSettingsLabel(String text) {
@@ -2241,15 +2564,7 @@ public class MainActivity extends Activity {
         sv.addView(list);
         box.addView(sv);
 
-        themeDialog.setContentView(box);
-        if (themeDialog.getWindow() != null) {
-            themeDialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            themeDialog.getWindow().setLayout(
-                    (int) (getResources().getDisplayMetrics().widthPixels * 0.88),
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-            );
-        }
-        themeDialog.show();
+        showStyledDialog(themeDialog, box, 0.88f, ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
     private void showFontDropdownDialog(Dialog parentSettingsDialog) {
@@ -2284,7 +2599,7 @@ public class MainActivity extends Activity {
             TextView item = new TextView(this);
             item.setText((isSelected ? "✓  " : "") + FONT_NAMES[idx]);
             item.setTextColor(isSelected ? getAccentTextColor() : getTextPrimaryColor());
-            item.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            item.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);
             item.setTypeface(getTypefaceForIndex(idx, isSelected));
             item.setIncludeFontPadding(false);
             item.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
@@ -2294,7 +2609,7 @@ public class MainActivity extends Activity {
                     isSelected ? 1 : 0,
                     getPrimaryColor()
             ));
-            item.setPadding(dp(14), dp(12), dp(14), dp(12));
+            item.setPadding(dp(14), dp(11), dp(14), dp(11));
 
             LinearLayout.LayoutParams itemLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -2314,20 +2629,14 @@ public class MainActivity extends Activity {
         }
 
         sv.addView(list);
-        box.addView(sv);
+        LinearLayout.LayoutParams svLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+        box.addView(sv, svLp);
 
-        fontDialog.setContentView(box);
-        if (fontDialog.getWindow() != null) {
-            fontDialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            fontDialog.getWindow().setLayout(
-                    (int) (getResources().getDisplayMetrics().widthPixels * 0.88),
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-            );
-        }
-        fontDialog.show();
+        showStyledDialog(fontDialog, box, 0.90f, (int) (getResources().getDisplayMetrics().heightPixels * 0.78));
     }
 
-    // ==================== 5. TOOLBAR CUSTOMIZATION WITH SMOOTH DRAG & DROP ====================
+    // ==================== 5. TOOLBAR CUSTOMIZATION (CONTINUOUS DRAG & DROP FROM TOP TO BOTTOM) ====================
 
     private void showToolbarCustomizationDialog() {
         Dialog dialog = new Dialog(this);
@@ -2337,7 +2646,7 @@ public class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
         root.setBackground(roundedRect(getCardBgColor(), 20, 1, getBorderColor()));
-        root.setPadding(dp(18), dp(18), dp(18), dp(16));
+        root.setPadding(dp(18), dp(16), dp(18), dp(14));
 
         TextView title = new TextView(this);
         title.setText("تخصيص وترتيب أدوات التحرير");
@@ -2348,16 +2657,19 @@ public class MainActivity extends Activity {
         title.setGravity(Gravity.RIGHT);
         root.addView(title);
 
+        // Include the [ نصوص | رموز ] segmented toggle right at the top of customization dialog too
+        root.addView(createToolbarModeSegmentedRow(null));
+
         TextView sub = new TextView(this);
-        sub.setText("اسحب الأداة من مقبض السحب (≡) للأعلى أو للأسفل لتغيير ترتيبها، أو ضع علامة (✓) لإظهارها:");
+        sub.setText("أمسك مقبض السحب (≡) واسحب الأداة لأي موضع في القائمة ثم اتركها لتسقط في مكانها:");
         sub.setTextColor(getTextSecondaryColor());
         sub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
         sub.setTypeface(getAppTypeface(false));
         sub.setGravity(Gravity.RIGHT);
         LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        subLp.topMargin = dp(4);
-        subLp.bottomMargin = dp(12);
+        subLp.topMargin = dp(2);
+        subLp.bottomMargin = dp(10);
         root.addView(sub, subLp);
 
         final List<String> currentOrder = new ArrayList<>(getOrderedToolList());
@@ -2370,14 +2682,17 @@ public class MainActivity extends Activity {
         listContainer.setClipToPadding(false);
         listScroll.addView(listContainer);
 
+        final List<LinearLayout> rowViews = new ArrayList<>();
         final Runnable[] rebuildListRef = new Runnable[1];
+
         rebuildListRef[0] = () -> {
             listContainer.removeAllViews();
-            int rowHeightEstimate = dp(54);
+            rowViews.clear();
+            final int stepHeight = dp(54); // 46dp height + 8dp bottomMargin
 
             for (int i = 0; i < currentOrder.size(); i++) {
-                final int index = i;
-                final String toolId = currentOrder.get(index);
+                final int origIndex = i;
+                final String toolId = currentOrder.get(origIndex);
 
                 LinearLayout row = new LinearLayout(this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
@@ -2389,7 +2704,7 @@ public class MainActivity extends Activity {
                         ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
                 rowLp.bottomMargin = dp(8);
 
-                // Drag Handle
+                // Drag Handle (≡)
                 FrameLayout dragHandle = new FrameLayout(this);
                 ImageView dragIcon = new ImageView(this);
                 int dragResId = getDrawableId("ic_drag_handle");
@@ -2398,7 +2713,7 @@ public class MainActivity extends Activity {
                     dragIcon.setImageTintList(ColorStateList.valueOf(getTextSecondaryColor()));
                 }
                 dragHandle.addView(dragIcon, new FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER));
-                row.addView(dragHandle, new LinearLayout.LayoutParams(dp(36), dp(36)));
+                row.addView(dragHandle, new LinearLayout.LayoutParams(dp(38), dp(38)));
 
                 // Vector Tool Icon Badge
                 FrameLayout iconBadge = new FrameLayout(this);
@@ -2435,43 +2750,71 @@ public class MainActivity extends Activity {
                 });
                 row.addView(cb);
 
-                final float[] startRawY = new float[1];
-                final int[] currentDragIdx = new int[]{index};
+                final float[] downRawY = new float[1];
+                final int[] downScrollY = new int[1];
+                final int[] targetIndexHolder = new int[]{origIndex};
                 final boolean[] isDragging = new boolean[]{false};
 
                 dragHandle.setOnTouchListener((v, event) -> {
                     int action = event.getActionMasked();
                     if (action == MotionEvent.ACTION_DOWN) {
-                        startRawY[0] = event.getRawY();
-                        currentDragIdx[0] = index;
+                        downRawY[0] = event.getRawY();
+                        downScrollY[0] = listScroll.getScrollY();
+                        targetIndexHolder[0] = origIndex;
                         isDragging[0] = true;
                         listScroll.requestDisallowInterceptTouchEvent(true);
-                        row.setTranslationZ(dp(12));
-                        row.setAlpha(0.92f);
+                        row.setTranslationZ(dp(16));
+                        row.setAlpha(0.95f);
                         row.setBackground(roundedRect(getLightAccentColor(), 12, 2, getPrimaryColor()));
                         return true;
                     } else if (action == MotionEvent.ACTION_MOVE && isDragging[0]) {
-                        float dy = event.getRawY() - startRawY[0];
-                        row.setTranslationY(dy);
-                        int shift = Math.round(dy / rowHeightEstimate);
-                        int targetIdx = Math.max(0, Math.min(currentOrder.size() - 1, currentDragIdx[0] + shift));
-                        if (targetIdx != currentDragIdx[0]) {
-                            String moved = currentOrder.remove(currentDragIdx[0]);
-                            currentOrder.add(targetIdx, moved);
-                            currentDragIdx[0] = targetIdx;
-                            startRawY[0] = event.getRawY();
-                            row.setTranslationY(0f);
-                            listContainer.post(rebuildListRef[0]);
-                            return false;
+                        // Auto-scroll when finger nears top or bottom of ScrollView
+                        int[] scrollLoc = new int[2];
+                        listScroll.getLocationOnScreen(scrollLoc);
+                        float fingerYInScroll = event.getRawY() - scrollLoc[1];
+                        int scrollH = listScroll.getHeight();
+                        int edgeZone = dp(48);
+                        if (fingerYInScroll < edgeZone) {
+                            listScroll.scrollBy(0, -dp(8));
+                        } else if (fingerYInScroll > scrollH - edgeZone) {
+                            listScroll.scrollBy(0, dp(8));
+                        }
+
+                        int scrollDelta = listScroll.getScrollY() - downScrollY[0];
+                        float totalDy = (event.getRawY() - downRawY[0]) + scrollDelta;
+
+                        // Clamp visual translation within list bounds
+                        float minDy = -origIndex * (float) stepHeight;
+                        float maxDy = (currentOrder.size() - 1 - origIndex) * (float) stepHeight;
+                        float clampedDy = Math.max(minDy, Math.min(maxDy, totalDy));
+                        row.setTranslationY(clampedDy);
+
+                        int shift = Math.round(clampedDy / stepHeight);
+                        int newTarget = Math.max(0, Math.min(currentOrder.size() - 1, origIndex + shift));
+                        targetIndexHolder[0] = newTarget;
+
+                        // Smoothly shift intermediate rows up or down to open a gap without detaching views
+                        for (int j = 0; j < rowViews.size(); j++) {
+                            if (j == origIndex) continue;
+                            View other = rowViews.get(j);
+                            float targetTransY = 0f;
+                            if (origIndex < newTarget && j > origIndex && j <= newTarget) {
+                                targetTransY = -stepHeight;
+                            } else if (origIndex > newTarget && j >= newTarget && j < origIndex) {
+                                targetTransY = stepHeight;
+                            }
+                            other.setTranslationY(targetTransY);
                         }
                         return true;
                     } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                         if (isDragging[0]) {
                             isDragging[0] = false;
-                            row.setTranslationY(0f);
-                            row.setTranslationZ(0f);
-                            row.setAlpha(1.0f);
                             listScroll.requestDisallowInterceptTouchEvent(false);
+                            int finalTarget = targetIndexHolder[0];
+                            if (finalTarget != origIndex && finalTarget >= 0 && finalTarget < currentOrder.size()) {
+                                String moved = currentOrder.remove(origIndex);
+                                currentOrder.add(finalTarget, moved);
+                            }
                             listContainer.post(rebuildListRef[0]);
                         }
                         return true;
@@ -2479,6 +2822,7 @@ public class MainActivity extends Activity {
                     return false;
                 });
 
+                rowViews.add(row);
                 listContainer.addView(row, rowLp);
             }
         };
@@ -2512,15 +2856,7 @@ public class MainActivity extends Activity {
         });
         root.addView(saveBtn, sbLp);
 
-        dialog.setContentView(root);
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            dialog.getWindow().setLayout(
-                    (int) (getResources().getDisplayMetrics().widthPixels * 0.92),
-                    (int) (getResources().getDisplayMetrics().heightPixels * 0.82)
-            );
-        }
-        dialog.show();
+        showStyledDialog(dialog, root, 0.92f, (int) (getResources().getDisplayMetrics().heightPixels * 0.84));
     }
 
     // ==================== 6. CUSTOM 3-DOTS MENU & SAFE VAULT (النسخ الآمنة) ====================
@@ -2535,7 +2871,6 @@ public class MainActivity extends Activity {
         root.setBackground(roundedRect(getCardBgColor(), 18, 1, getBorderColor()));
         root.setPadding(dp(16), dp(16), dp(16), dp(12));
 
-        // File Title Header
         TextView header = new TextView(this);
         header.setText(stripTxtExtension(file.name));
         header.setTextColor(getAccentTextColor());
@@ -2553,14 +2888,6 @@ public class MainActivity extends Activity {
         tdLp.bottomMargin = dp(4);
         root.addView(topDivider, tdLp);
 
-        // Exact requested order:
-        // 1. تثبيت الملف
-        // 2. إعادة تسمية الملف
-        // 3. إنشاء نسخة مكررة من الملف
-        // 4. إنشاء نسخة آمنة
-        // 5. تصفح النسخ الآمنة
-        // 6. مشاركة الملف
-        // 7. حذف الملف
         String[] labels = new String[]{
                 file.pinned ? "إلغاء تثبيت الملف" : "تثبيت الملف",
                 "إعادة تسمية الملف",
@@ -2626,15 +2953,7 @@ public class MainActivity extends Activity {
             }
         }
 
-        menuDialog.setContentView(root);
-        if (menuDialog.getWindow() != null) {
-            menuDialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            menuDialog.getWindow().setLayout(
-                    (int) (getResources().getDisplayMetrics().widthPixels * 0.86),
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-            );
-        }
-        menuDialog.show();
+        showStyledDialog(menuDialog, root, 0.86f, ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
     // --- SAFE VAULT LOGIC (النسخ الآمنة في مسار المجلد داخل الهاتف) ---
@@ -2682,12 +3001,12 @@ public class MainActivity extends Activity {
         return stripTxtExtension(originalFileName) + "__نسخة_آمنة_";
     }
 
-    private void createSafeSnapshot(NoteFile file, boolean silentBeforeDelete) {
+    private void createSafeSnapshot(NoteFile file, boolean silent) {
         if (folderUri == null || file == null) return;
         try {
             Uri vaultDirUri = getOrCreateSafeVaultDirectoryUri(true);
             if (vaultDirUri == null) {
-                if (!silentBeforeDelete) {
+                if (!silent) {
                     Toast.makeText(this, "تعذر الوصول إلى خزنة النسخ الآمنة", Toast.LENGTH_SHORT).show();
                 }
                 return;
@@ -2701,14 +3020,50 @@ public class MainActivity extends Activity {
                     getContentResolver(), vaultDirUri, "text/plain", snapName);
             if (snapUri != null) {
                 writeFileContent(snapUri, content);
-                if (!silentBeforeDelete) {
+                if (!silent) {
                     Toast.makeText(this, "تم إنشاء نسخة آمنة في الخزنة بنجاح", Toast.LENGTH_SHORT).show();
                 }
             }
         } catch (Exception e) {
-            if (!silentBeforeDelete) {
+            if (!silent) {
                 Toast.makeText(this, "تعذر إنشاء النسخة الآمنة", Toast.LENGTH_SHORT).show();
             }
+        }
+    }
+
+    private void renameAssociatedSafeSnapshots(String oldFileName, String newFileName) {
+        Uri vaultDirUri = getOrCreateSafeVaultDirectoryUri(false);
+        if (vaultDirUri == null) return;
+
+        String oldPrefix = getSafeSnapshotPrefix(oldFileName);
+        String newPrefix = getSafeSnapshotPrefix(newFileName);
+        if (oldPrefix.equals(newPrefix)) return;
+
+        try {
+            String vaultDocId = DocumentsContract.getDocumentId(vaultDirUri);
+            Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(folderUri, vaultDocId);
+            String[] projection = new String[]{
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME
+            };
+
+            try (Cursor c = getContentResolver().query(childrenUri, projection, null, null, null)) {
+                if (c != null) {
+                    while (c.moveToNext()) {
+                        String docId = c.getString(0);
+                        String name = c.getString(1);
+                        if (name != null && name.startsWith(oldPrefix)) {
+                            Uri snapUri = DocumentsContract.buildDocumentUriUsingTree(folderUri, docId);
+                            String updatedSnapName = newPrefix + name.substring(oldPrefix.length());
+                            try {
+                                DocumentsContract.renameDocument(getContentResolver(), snapUri, updatedSnapName);
+                            } catch (Exception ignored) {
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {
         }
     }
 
@@ -2831,7 +3186,7 @@ public class MainActivity extends Activity {
 
                 row.setOnClickListener(v -> {
                     dialog.dismiss();
-                    showSafeSnapshotPreviewDialog(file, snap);
+                    showSafeSnapshotPreviewDialog(file, snap, snapshots);
                 });
 
                 list.addView(row, rLp);
@@ -2851,18 +3206,10 @@ public class MainActivity extends Activity {
         closeBtn.setOnClickListener(v -> dialog.dismiss());
         root.addView(closeBtn, cLp);
 
-        dialog.setContentView(root);
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            dialog.getWindow().setLayout(
-                    (int) (getResources().getDisplayMetrics().widthPixels * 0.90),
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-            );
-        }
-        dialog.show();
+        showStyledDialog(dialog, root, 0.90f, ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
-    private void showSafeSnapshotPreviewDialog(NoteFile targetFile, SafeSnapshot snap) {
+    private void showSafeSnapshotPreviewDialog(NoteFile targetFile, SafeSnapshot snap, List<SafeSnapshot> allSnapshots) {
         String snapContent = readFileContent(snap.uri);
 
         Dialog previewDialog = new Dialog(this);
@@ -2918,11 +3265,26 @@ public class MainActivity extends Activity {
         configureTextButton(restoreBtn, "استعادة هذه النسخة", 14, true, Color.WHITE, 44);
         restoreBtn.setBackground(roundedRect(getPrimaryColor(), 10, 0, 0));
         restoreBtn.setOnClickListener(v -> {
+            // Silently check if current file has unsaved updates not in the latest snapshot
+            String currentFileContent = readFileContent(targetFile.uri);
+            if (!currentFileContent.trim().isEmpty() && !currentFileContent.equals(snapContent)) {
+                boolean alreadySavedInLatest = false;
+                if (allSnapshots != null && !allSnapshots.isEmpty()) {
+                    String latestSnapBody = readFileContent(allSnapshots.get(0).uri);
+                    if (currentFileContent.equals(latestSnapBody)) {
+                        alreadySavedInLatest = true;
+                    }
+                }
+                if (!alreadySavedInLatest) {
+                    createSafeSnapshot(targetFile, true);
+                }
+            }
+
             writeFileContent(targetFile.uri, snapContent);
             contentCache.put(targetFile.uri.toString(), snapContent);
             Toast.makeText(this, "تم استعادة النسخة الآمنة إلى الملف بنجاح", Toast.LENGTH_SHORT).show();
             previewDialog.dismiss();
-            loadFilesFromFolder();
+            openNoteFile(targetFile, ScreenState.READ);
         });
         LinearLayout.LayoutParams b1Lp = new LinearLayout.LayoutParams(0, dp(44), 1.3f);
         b1Lp.leftMargin = dp(6);
@@ -2938,18 +3300,22 @@ public class MainActivity extends Activity {
 
         root.addView(btnRow, brLp);
 
-        previewDialog.setContentView(root);
-        if (previewDialog.getWindow() != null) {
-            previewDialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            previewDialog.getWindow().setLayout(
-                    (int) (getResources().getDisplayMetrics().widthPixels * 0.92),
-                    (int) (getResources().getDisplayMetrics().heightPixels * 0.78)
-            );
-        }
-        previewDialog.show();
+        showStyledDialog(previewDialog, root, 0.92f, (int) (getResources().getDisplayMetrics().heightPixels * 0.78));
     }
 
-    // ==================== 7. FILE OPERATIONS (NEW, RENAME, DUPLICATE, DELETE, BACKUP) ====================
+    // ==================== 7. LUXURY CUSTOM DIALOGS FOR FILE OPERATIONS ====================
+
+    private void showStyledDialog(Dialog dialog, View rootView, float widthFraction, int heightSpec) {
+        dialog.setContentView(rootView);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setLayout(
+                    (int) (getResources().getDisplayMetrics().widthPixels * widthFraction),
+                    heightSpec
+            );
+        }
+        dialog.show();
+    }
 
     private void onNewFileClicked() {
         if (folderUri == null) {
@@ -2958,26 +3324,68 @@ public class MainActivity extends Activity {
             return;
         }
 
-        AlertDialog.Builder b = new AlertDialog.Builder(this);
-        b.setTitle("إنشاء ملف نصي جديد");
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        root.setBackground(roundedRect(getCardBgColor(), 18, 1, getBorderColor()));
+        root.setPadding(dp(20), dp(18), dp(20), dp(16));
+
+        TextView title = new TextView(this);
+        title.setText("إنشاء ملف نصي جديد");
+        title.setTextColor(getAccentTextColor());
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        title.setTypeface(getAppTypeface(true));
+        title.setGravity(Gravity.RIGHT);
+        root.addView(title);
 
         EditText input = new EditText(this);
         input.setHint("اسم الملف (مثال: مقالة التراث الحضرمي)");
+        input.setHintTextColor(getTextSecondaryColor());
+        input.setTextColor(getTextPrimaryColor());
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);
         input.setSingleLine(true);
         input.setTypeface(getAppTypeface(false));
-        input.setPadding(dp(18), dp(14), dp(18), dp(14));
-        b.setView(input);
+        input.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        input.setBackground(roundedRect(getInputBgColor(), 10, 1, getBorderColor()));
+        input.setPadding(dp(14), dp(12), dp(14), dp(12));
+        LinearLayout.LayoutParams inLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        inLp.topMargin = dp(12);
+        inLp.bottomMargin = dp(16);
+        root.addView(input, inLp);
 
-        b.setPositiveButton("إنشاء", (d, w) -> {
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(LinearLayout.HORIZONTAL);
+
+        Button createBtn = new Button(this);
+        configureTextButton(createBtn, "إنشاء الملف", 14, true, Color.WHITE, 44);
+        createBtn.setBackground(roundedRect(getPrimaryColor(), 10, 0, 0));
+        createBtn.setOnClickListener(v -> {
             String rawName = input.getText().toString().trim();
             if (rawName.isEmpty()) {
                 SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.US);
                 rawName = "مذكرة_" + sdf.format(new Date());
             }
+            dialog.dismiss();
             createNewTxtFile(rawName);
         });
-        b.setNegativeButton("إلغاء", null);
-        b.show();
+        LinearLayout.LayoutParams b1Lp = new LinearLayout.LayoutParams(0, dp(44), 1.2f);
+        b1Lp.leftMargin = dp(6);
+        btnRow.addView(createBtn, b1Lp);
+
+        Button cancelBtn = new Button(this);
+        configureTextButton(cancelBtn, "إلغاء", 14, true, getTextPrimaryColor(), 44);
+        cancelBtn.setBackground(roundedRect(getSecondaryBtnBgColor(), 10, 1, getBorderColor()));
+        cancelBtn.setOnClickListener(v -> dialog.dismiss());
+        LinearLayout.LayoutParams b2Lp = new LinearLayout.LayoutParams(0, dp(44), 1f);
+        b2Lp.rightMargin = dp(6);
+        btnRow.addView(cancelBtn, b2Lp);
+
+        root.addView(btnRow);
+        showStyledDialog(dialog, root, 0.90f, ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
     private void createNewTxtFile(String baseName) {
@@ -3026,23 +3434,75 @@ public class MainActivity extends Activity {
         if (currentScreen == ScreenState.EDIT) {
             saveCurrentFileImmediately(false);
         }
-        AlertDialog.Builder b = new AlertDialog.Builder(this);
-        b.setTitle("إعادة تسمية الملف");
+
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        root.setBackground(roundedRect(getCardBgColor(), 18, 1, getBorderColor()));
+        root.setPadding(dp(20), dp(18), dp(20), dp(16));
+
+        TextView title = new TextView(this);
+        title.setText("إعادة تسمية الملف");
+        title.setTextColor(getAccentTextColor());
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        title.setTypeface(getAppTypeface(true));
+        title.setGravity(Gravity.RIGHT);
+        root.addView(title);
 
         EditText input = new EditText(this);
         input.setText(stripTxtExtension(file.name));
+        input.setTextColor(getTextPrimaryColor());
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);
         input.setSingleLine(true);
         input.setTypeface(getAppTypeface(false));
-        input.setPadding(dp(18), dp(14), dp(18), dp(14));
-        b.setView(input);
+        input.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        input.setBackground(roundedRect(getInputBgColor(), 10, 1, getBorderColor()));
+        input.setPadding(dp(14), dp(12), dp(14), dp(12));
+        input.setSelection(input.getText().length());
+        LinearLayout.LayoutParams inLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        inLp.topMargin = dp(12);
+        inLp.bottomMargin = dp(16);
+        root.addView(input, inLp);
 
-        b.setPositiveButton("حفظ الاسم", (d, w) -> {
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(LinearLayout.HORIZONTAL);
+
+        Button saveBtn = new Button(this);
+        configureTextButton(saveBtn, "حفظ الاسم", 14, true, Color.WHITE, 44);
+        saveBtn.setBackground(roundedRect(getPrimaryColor(), 10, 0, 0));
+        saveBtn.setOnClickListener(v -> {
             String newBase = input.getText().toString().trim();
             if (newBase.isEmpty()) return;
+            String oldName = file.name;
+            String oldUriStr = file.uri.toString();
             String newFullName = ensureTxtExtension(newBase);
+            dialog.dismiss();
+
             try {
                 Uri renamedUri = DocumentsContract.renameDocument(getContentResolver(), file.uri, newFullName);
                 if (renamedUri != null) {
+                    // 1. Preserve Pin state across URI change
+                    Set<String> pinned = new HashSet<>(prefs.getStringSet("pinned_files", new HashSet<>()));
+                    if (pinned.contains(oldUriStr) || file.pinned) {
+                        pinned.remove(oldUriStr);
+                        pinned.add(renamedUri.toString());
+                        prefs.edit().putStringSet("pinned_files", pinned).apply();
+                        file.pinned = true;
+                    }
+
+                    // 2. Update cached content map
+                    String cached = contentCache.remove(oldUriStr);
+                    if (cached != null) {
+                        contentCache.put(renamedUri.toString(), cached);
+                    }
+
+                    // 3. Rename associated Safe Snapshots in Vault so they stay linked
+                    renameAssociatedSafeSnapshots(oldName, newFullName);
+
                     file.uri = renamedUri;
                     file.name = newFullName;
                     if (docTitleView != null && currentScreen != ScreenState.HOME) {
@@ -3055,8 +3515,20 @@ public class MainActivity extends Activity {
                 Toast.makeText(this, "تعذر تغيير الاسم: " + e.getMessage(), Toast.LENGTH_LONG).show();
             }
         });
-        b.setNegativeButton("إلغاء", null);
-        b.show();
+        LinearLayout.LayoutParams b1Lp = new LinearLayout.LayoutParams(0, dp(44), 1.2f);
+        b1Lp.leftMargin = dp(6);
+        btnRow.addView(saveBtn, b1Lp);
+
+        Button cancelBtn = new Button(this);
+        configureTextButton(cancelBtn, "إلغاء", 14, true, getTextPrimaryColor(), 44);
+        cancelBtn.setBackground(roundedRect(getSecondaryBtnBgColor(), 10, 1, getBorderColor()));
+        cancelBtn.setOnClickListener(v -> dialog.dismiss());
+        LinearLayout.LayoutParams b2Lp = new LinearLayout.LayoutParams(0, dp(44), 1f);
+        b2Lp.rightMargin = dp(6);
+        btnRow.addView(cancelBtn, b2Lp);
+
+        root.addView(btnRow);
+        showStyledDialog(dialog, root, 0.90f, ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
     private void duplicateFile(NoteFile file) {
@@ -3078,10 +3550,45 @@ public class MainActivity extends Activity {
     }
 
     private void confirmDeleteFile(NoteFile file) {
-        AlertDialog.Builder b = new AlertDialog.Builder(this);
-        b.setTitle("تأكيد حذف الملف");
-        b.setMessage("هل أنت متأكد من حذف الملف \"" + stripTxtExtension(file.name) + "\"؟");
-        b.setPositiveButton("حذف", (d, w) -> {
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        root.setBackground(roundedRect(getCardBgColor(), 18, 1, getBorderColor()));
+        root.setPadding(dp(20), dp(18), dp(20), dp(16));
+
+        TextView title = new TextView(this);
+        title.setText("تأكيد حذف الملف");
+        title.setTextColor(Color.parseColor("#DC2626"));
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        title.setTypeface(getAppTypeface(true));
+        title.setGravity(Gravity.RIGHT);
+        root.addView(title);
+
+        TextView msg = new TextView(this);
+        msg.setText("هل أنت متأكد من حذف الملف \"" + stripTxtExtension(file.name) + "\"؟");
+        msg.setTextColor(getTextPrimaryColor());
+        msg.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);
+        msg.setTypeface(getAppTypeface(false));
+        msg.setGravity(Gravity.RIGHT);
+        msg.setLineSpacing(dp(4), 1.1f);
+        LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        mLp.topMargin = dp(10);
+        mLp.bottomMargin = dp(18);
+        root.addView(msg, mLp);
+
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(LinearLayout.HORIZONTAL);
+
+        // Distinct Red Delete Button regardless of active theme
+        Button deleteBtn = new Button(this);
+        configureTextButton(deleteBtn, "حذف الملف", 14, true, Color.WHITE, 44);
+        deleteBtn.setBackground(roundedRect(Color.parseColor("#DC2626"), 10, 0, 0));
+        deleteBtn.setOnClickListener(v -> {
+            dialog.dismiss();
             try {
                 // Save an automatic safe copy in the phone's vault directory before deletion
                 createSafeSnapshot(file, true);
@@ -3089,6 +3596,10 @@ public class MainActivity extends Activity {
                 boolean deleted = DocumentsContract.deleteDocument(getContentResolver(), file.uri);
                 if (deleted) {
                     contentCache.remove(file.uri.toString());
+                    Set<String> pinned = new HashSet<>(prefs.getStringSet("pinned_files", new HashSet<>()));
+                    if (pinned.remove(file.uri.toString())) {
+                        prefs.edit().putStringSet("pinned_files", pinned).apply();
+                    }
                     Toast.makeText(this, "تم حذف الملف", Toast.LENGTH_SHORT).show();
                     if (currentScreen != ScreenState.HOME) {
                         showHomeScreen(true);
@@ -3100,8 +3611,20 @@ public class MainActivity extends Activity {
                 Toast.makeText(this, "تعذر الحذف: " + e.getMessage(), Toast.LENGTH_LONG).show();
             }
         });
-        b.setNegativeButton("إلغاء", null);
-        b.show();
+        LinearLayout.LayoutParams b1Lp = new LinearLayout.LayoutParams(0, dp(44), 1.2f);
+        b1Lp.leftMargin = dp(6);
+        btnRow.addView(deleteBtn, b1Lp);
+
+        Button cancelBtn = new Button(this);
+        configureTextButton(cancelBtn, "إلغاء", 14, true, getTextPrimaryColor(), 44);
+        cancelBtn.setBackground(roundedRect(getSecondaryBtnBgColor(), 10, 1, getBorderColor()));
+        cancelBtn.setOnClickListener(v -> dialog.dismiss());
+        LinearLayout.LayoutParams b2Lp = new LinearLayout.LayoutParams(0, dp(44), 1f);
+        b2Lp.rightMargin = dp(6);
+        btnRow.addView(cancelBtn, b2Lp);
+
+        root.addView(btnRow);
+        showStyledDialog(dialog, root, 0.88f, ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
     private void shareTextContent(String title, String body) {
@@ -3174,6 +3697,7 @@ public class MainActivity extends Activity {
                 folderUri = treeUri;
                 prefs.edit().putString("folder_uri", treeUri.toString()).apply();
                 contentCache.clear();
+                savedHomeScrollY = 0;
                 showHomeScreen(true);
             }
         } else if (requestCode == REQ_CREATE_BACKUP_ZIP) {
