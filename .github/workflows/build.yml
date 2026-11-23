@@ -44,7 +44,7 @@ jobs:
             sed -i '1i package com.mazwd.app;' app/src/main/java/com/mazwd/app/MainActivity.java
           fi
 
-          # Download Arabic Fonts (Almarai, Aref Ruqaa, Tajawal, Reem Kufi)
+          # Download Open-Source Arabic Fonts from Google Fonts
           curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/almarai/Almarai-Regular.ttf" -o app/src/main/res/font/mazwd_arabic.ttf
           curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/almarai/Almarai-Bold.ttf" -o app/src/main/res/font/mazwd_arabic_bold.ttf
           curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/arefruqaa/ArefRuqaa-Regular.ttf" -o app/src/main/res/font/aref_ruqaa.ttf
@@ -54,13 +54,25 @@ jobs:
           curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/reemkufi/ReemKufi%5Bwght%5D.ttf" -o app/src/main/res/font/reem_kufi.ttf
           cp app/src/main/res/font/reem_kufi.ttf app/src/main/res/font/reem_kufi_bold.ttf
 
+          # 5 New Open-Source Arabic Fonts (Scheherazade New Bold, Readex Pro, Noto Sans Arabic, Noto Naskh Arabic, IBM Plex Sans Arabic)
+          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/scheherazadenew/ScheherazadeNew-Bold.ttf" -o app/src/main/res/font/scheherazade_bold.ttf
+          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/readexpro/ReadexPro%5BHEXP%2Cwght%5D.ttf" -o app/src/main/res/font/readex_pro.ttf
+          cp app/src/main/res/font/readex_pro.ttf app/src/main/res/font/readex_pro_bold.ttf
+          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansarabic/NotoSansArabic%5Bwdth%2Cwght%5D.ttf" -o app/src/main/res/font/noto_sans_arabic.ttf
+          cp app/src/main/res/font/noto_sans_arabic.ttf app/src/main/res/font/noto_sans_arabic_bold.ttf
+          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/notonaskharabic/NotoNaskhArabic%5Bwght%5D.ttf" -o app/src/main/res/font/noto_naskh_arabic.ttf
+          cp app/src/main/res/font/noto_naskh_arabic.ttf app/src/main/res/font/noto_naskh_arabic_bold.ttf
+          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic/IBMPlexSansArabic-Regular.ttf" -o app/src/main/res/font/ibm_plex_arabic.ttf
+          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic/IBMPlexSansArabic-Bold.ttf" -o app/src/main/res/font/ibm_plex_arabic_bold.ttf
+
+          # Validate all downloaded font files (fallback to valid TTF if any download was incomplete)
           for f in app/src/main/res/font/*.ttf; do
-            if [ ! -s "$f" ]; then
+            if [ ! -s "$f" ] || [ $(wc -c < "$f") -lt 10000 ]; then
               cp /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf "$f"
             fi
           done
 
-          # App Launcher Icon
+          # Restored Classic Luxury App Launcher Icon
           cat << 'EOF' > app/src/main/res/drawable/app_icon.xml
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
               android:width="108dp"
@@ -71,14 +83,16 @@ jobs:
                   android:fillColor="#1E3A8A"
                   android:pathData="M0,0h108v108h-108z"/>
               <path
-                  android:fillColor="#FFFFFF"
-                  android:pathData="M30,22h48c3.3,0 6,2.7 6,6v52c0,3.3 -2.7,6 -6,6H30c-3.3,0 -6,-2.7 -6,-6V28c0,-3.3 2.7,-6 6,-6z"/>
+                  android:fillColor="#172554"
+                  android:pathData="M18,18h72c4.4,0 8,3.6 8,8v56c0,4.4 -3.6,8 -8,8H18c-4.4,0 -8,-3.6 -8,-8V26c0,-4.4 3.6,-8 8,-8z"/>
               <path
-                  android:fillColor="#9A3412"
-                  android:pathData="M30,22h48c3.3,0 6,2.7 6,6v8H24v-8c0,-3.3 2.7,-6 6,-6z"/>
+                  android:strokeColor="#D4AF37"
+                  android:strokeWidth="3"
+                  android:fillColor="#00000000"
+                  android:pathData="M24,24h60c2.2,0 4,1.8 4,4v52c0,2.2 -1.8,4 -4,4H24c-2.2,0 -4,-1.8 -4,-4V28c0,-2.2 1.8,-4 4,-4z"/>
               <path
-                  android:fillColor="#1E3A8A"
-                  android:pathData="M34,46h40v4H34zM34,56h40v4H34zM34,66h26v4H34z"/>
+                  android:fillColor="#D4AF37"
+                  android:pathData="M34,40h40v4H34zM34,52h40v4H34zM34,64h26v4H34z"/>
           </vector>
           EOF
 
@@ -194,6 +208,7 @@ jobs:
           </vector>
           EOF
 
+          # Magic Wand Icon (Auto Fix High) for Auto-Format
           cat << 'EOF' > app/src/main/res/drawable/ic_auto_format.xml
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
               android:width="24dp"
@@ -202,7 +217,7 @@ jobs:
               android:viewportHeight="24">
               <path
                   android:fillColor="#FF000000"
-                  android:pathData="M3,21h18v-2H3v2zm6,-4h12v-2H9v2zm-6,-4h18v-2H3v2zm6,-4h12V7H9v2zM3,3v2h18V3H3z"/>
+                  android:pathData="M7.5,5.6L10,7 8.6,4.5 10,2 7.5,3.4 5,2l1.4,2.5L5,7zm12,9.8L17,14l1.4,2.5L17,19l2.5,-1.4L22,19l-1.4,-2.5L22,14zM22,2l-2.5,1.4L17,2l1.4,2.5L17,7l2.5,-1.4L22,7l-1.4,-2.5zm-7.63,5.29c-0.39,-0.39 -1.02,-0.39 -1.41,0L1.29,18.96c-0.39,0.39 -0.39,1.02 0,1.41l2.34,2.34c0.39,0.39 1.02,0.39 1.41,0L16.7,11.05c0.39,-0.39 0.39,-1.02 0,-1.41l-2.33,-2.35zm-1.03,5.49l-2.12,-2.12 2.44,-2.44 2.12,2.12 -2.44,2.44z"/>
           </vector>
           EOF
 
@@ -305,8 +320,8 @@ jobs:
                   applicationId "com.mazwd.app"
                   minSdk 27
                   targetSdk 34
-                  versionCode 9
-                  versionName "2.5.0"
+                  versionCode 10
+                  versionName "2.6.0"
               }
 
               buildTypes {
