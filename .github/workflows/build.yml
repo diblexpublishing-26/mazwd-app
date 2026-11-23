@@ -58,8 +58,6 @@ jobs:
           sed -i '/^\x60/d' app/src/main/java/com/mazwd/app/MainActivity.java
 
           cat << 'PYEOF' > patch_app.py
-          import re
-
           path = "app/src/main/java/com/mazwd/app/MainActivity.java"
           with open(path, "r", encoding="utf-8") as f:
               code = f.read()
@@ -116,28 +114,15 @@ jobs:
           if old_home_end in code and "applyUnclippedArabicTextLabels(rootContainer)" not in code:
               code = code.replace(old_home_end, new_home_end, 1)
 
-          # Preserve original reset button click action inside its tag so "نعم" executes it
-          old_reset_pattern = re.compile(
-              r'(\w+)\.setOnClickListener\(v\s*->\s*\{\s*currentOrder\.clear\(\);',
-              re.DOTALL
-          )
-          match = old_reset_pattern.search(code)
-          if match:
-              btn_var = match.group(1)
-              code = old_reset_pattern.sub(
-                  "View.OnClickListener origResetAction = v -> {\n            currentOrder.clear();",
-                  code,
-                  count=1
-              )
-              target_add = "rebuildListRef[0].run();\n        });"
-              if target_add in code:
-                  code = code.replace(
-                      target_add,
-                      "rebuildListRef[0].run();\n        };\n        " + btn_var + ".setTag(origResetAction);\n        " + btn_var + ".setOnClickListener(origResetAction);",
-                      1
-                  )
+          # 8. Intercept Reset Default button click cleanly with confirmation dialog
+          old_clear = "currentOrder.clear();"
+          new_clear = "if (!isResetToolbarConfirmed) { showResetToolbarConfirmDialog(v); return; } isResetToolbarConfirmed = false; currentOrder.clear();"
+          if old_clear in code and "isResetToolbarConfirmed" not in code:
+              code = code.replace(old_clear, new_clear, 1)
 
           helper_lines = [
+              "    private boolean isResetToolbarConfirmed = false;",
+              "",
               "    private void ensureNoMediaInSafeVault(Uri vaultDirUri) {",
               "        if (folderUri == null || vaultDirUri == null) return;",
               "        try {",
@@ -227,7 +212,6 @@ jobs:
               "                        topBtnLp.bottomMargin = dp(8);",
               "                        int insertIdx = Math.min(2, rootLinear.getChildCount());",
               "                        rootLinear.addView(btn, insertIdx, topBtnLp);",
-              "                        btn.setOnClickListener(e -> showResetToolbarConfirmDialog(btn));",
               "                    }",
               "                }",
               "            }",
@@ -245,7 +229,7 @@ jobs:
               "        }",
               "    }",
               "",
-              "    private void showResetToolbarConfirmDialog(Button resetBtn) {",
+              "    private void showResetToolbarConfirmDialog(View resetBtn) {",
               "        Dialog confirmDialog = new Dialog(this);",
               "        confirmDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);",
               "        LinearLayout box = new LinearLayout(this);",
@@ -282,10 +266,8 @@ jobs:
               "        yesBtn.setBackground(roundedRect(getPrimaryColor(), 10, 0, 0));",
               "        yesBtn.setOnClickListener(v -> {",
               "            confirmDialog.dismiss();",
-              "            Object tagListener = resetBtn.getTag();",
-              "            if (tagListener instanceof View.OnClickListener) {",
-              "                ((View.OnClickListener) tagListener).onClick(resetBtn);",
-              "            }",
+              "            isResetToolbarConfirmed = true;",
+              "            if (resetBtn != null) resetBtn.performClick();",
               "        });",
               "        LinearLayout.LayoutParams b1Lp = new LinearLayout.LayoutParams(0, dp(44), 1f);",
               "        b1Lp.leftMargin = dp(6);",
