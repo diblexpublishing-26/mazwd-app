@@ -1,16 +1,18 @@
 package com.mazwd.app;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.Dialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
-import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
@@ -19,6 +21,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.DocumentsContract;
 import android.text.Editable;
+import android.text.InputType;
+import android.text.Layout;
 import android.text.Spannable;
 import android.text.SpannableString;
 import android.text.TextUtils;
@@ -41,7 +45,6 @@ import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -55,67 +58,101 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 public class MainActivity extends Activity {
 
-    private static final int REQ_OPEN_TREE = 1001;
-    private static final int REQ_CREATE_ZIP = 1002;
-
+    private static final int REQ_PICK_FOLDER = 1001;
+    private static final int REQ_CREATE_BACKUP_ZIP = 1002;
     private static final String PREFS_NAME = "mazwd_prefs";
-    private static final String KEY_TREE_URI = "tree_uri";
-    private static final String KEY_THEME_INDEX = "theme_index";
-    private static final String KEY_FONT_INDEX = "font_index";
-    private static final String KEY_ZOOM_PERCENT = "zoom_percent";
-    private static final String KEY_SIGNATURE = "custom_signature";
-    private static final String KEY_SIGNATURE_INITIALIZED = "sig_init_v3";
-    private static final String KEY_ENABLED_TOOLS = "enabled_tools_v3";
-    private static final String KEY_TOOLBAR_ORDER = "toolbar_order_v3";
-    private static final String KEY_TOOLBAR_ICONS_ONLY = "toolbar_icons_only";
+    private static final String SAFE_VAULT_FOLDER_NAME = "خزنة_النسخ_الآمنة";
 
     private static final String DEFAULT_SIGNATURE = "أ. شفيقة مزود | باحثة في التراث الحضرمي";
     private static final String SIGNATURE_HINT = "اكتب توقيعك هنا\nمثال: عبدالله سعيد - مدير التحرير";
 
-    private static final int COLOR_BG_MAIN = 0xFFF5F7FA;
-    private static final int COLOR_CARD_BG = 0xFFFFFFFF;
-    private static final int COLOR_TEXT_DARK = 0xFF1E293B;
-    private static final int COLOR_TEXT_MUTED = 0xFF64748B;
-    private static final int COLOR_BORDER = 0xFFE2E8F0;
-    private static final int COLOR_SEARCH_HIGHLIGHT = 0xFFFDE047;
+    private enum ScreenState { HOME, READ, EDIT }
+    private ScreenState currentScreen = ScreenState.HOME;
 
-    private static class ThemePalette {
-        final String name;
-        final int primary;
-        final int primaryDark;
-        final int accentLight;
+    private SharedPreferences prefs;
+    private Uri folderUri;
 
-        ThemePalette(String name, int primary, int primaryDark, int accentLight) {
-            this.name = name;
-            this.primary = primary;
-            this.primaryDark = primaryDark;
-            this.accentLight = accentLight;
-        }
+    private static class NoteFile {
+        Uri uri;
+        String name;
+        long lastModified;
+        long size;
+        boolean pinned;
+        String cachedContent;
+        String matchSnippet;
     }
 
-    private static final ThemePalette[] THEMES = new ThemePalette[]{
-            new ThemePalette("الكحلي الملكي", 0xFF1E3A8A, 0xFF172554, 0xFFDBEAFE),
-            new ThemePalette("الأخضر الزمردي", 0xFF065F46, 0xFF064E3B, 0xFFD1FAE5),
-            new ThemePalette("العنابي الدافئ", 0xFF881337, 0xFF4C0519, 0xFFFFE4E6),
-            new ThemePalette("البنفسجي الهادئ", 0xFF4C1D95, 0xFF2E1065, 0xFFEDE9FE),
-            new ThemePalette("الرمادي الكلاسيكي", 0xFF334155, 0xFF0F172A, 0xFFF1F5F9),
-            new ThemePalette("البني التراثي", 0xFF78350F, 0xFF451A03, 0xFFFEF3C7),
-            new ThemePalette("الطيني الحضرمي", 0xFF9A3412, 0xFF7C2D12, 0xFFFFEDD5),
-            new ThemePalette("الأزرق الفيروزي", 0xFF155E75, 0xFF083344, 0xFFCFFAFE)
+    private static class SafeSnapshot {
+        Uri uri;
+        String fileName;
+        String displayDate;
+        long lastModified;
+        long size;
+    }
+
+    private final List<NoteFile> allFiles = new ArrayList<>();
+    private final Map<String, String> contentCache = new HashMap<>();
+    private NoteFile currentFile = null;
+    private String currentSearchQuery = "";
+
+    private final ArrayList<String> undoStack = new ArrayList<>();
+    private int undoIndex = -1;
+    private boolean isUndoRedoAction = false;
+    private boolean isDirty = false;
+
+    private FrameLayout rootContainer;
+    private EditText editorEditText;
+    private TextView readTextView;
+    private ScrollView readScrollView;
+    private TextView docTitleView;
+    private TextView statsBarView;
+    private TextView zoomPercentView;
+    private LinearLayout editorToolbarContainer;
+    private LinearLayout readActionBar;
+    private LinearLayout homeFilesContainer;
+    private EditText searchInput;
+
+    // Fast Slider & Quick Jump views
+    private FrameLayout sliderTouchContainer;
+    private View sliderThumb;
+    private TextView sliderBubble;
+    private LinearLayout jumpMenuCard;
+    private View jumpButton;
+    private boolean isSliderDragging = false;
+
+    private final Handler autoSaveHandler = new Handler(Looper.getMainLooper());
+    private final Handler sliderFadeHandler = new Handler(Looper.getMainLooper());
+    private final Runnable sliderFadeRunnable = () -> {
+        if (sliderTouchContainer != null && !isSliderDragging) {
+            sliderTouchContainer.animate().alpha(0.38f).setDuration(300).start();
+        }
     };
 
-    private static final String[] FONT_NAMES = new String[]{
+    // 8 Luxury Themes: {Name, PrimaryHex, DarkHeaderHex, LightAccentHex}
+    private static final String[][] THEMES = {
+            {"الكحلي الملكي", "#1E3A8A", "#172554", "#DBEAFE"},
+            {"الأخضر الزمردي", "#065F46", "#064E3B", "#D1FAE5"},
+            {"العنابي الفاخر", "#881337", "#4C0519", "#FFE4E6"},
+            {"البني التراثي", "#78350F", "#451A03", "#FEF3C7"},
+            {"الطيني الحضرمي", "#9A3412", "#431407", "#FFEDD5"},
+            {"البنفسجي الأنيق", "#5B21B6", "#2E1065", "#EDE9FE"},
+            {"الرمادي الرسمي", "#334155", "#0F172A", "#E2E8F0"},
+            {"التركواز الهادئ", "#115E59", "#042F2E", "#CCFBF1"}
+    };
+
+    // 7 Selectable Fonts
+    private static final String[] FONT_NAMES = {
             "Sans — خط واضح وعصري (افتراضي)",
             "تجوال — خط حديث وأنيق للمقالات",
             "المراعي — خط عربي كلاسيكي مريح ومتوازن",
@@ -125,320 +162,314 @@ public class MainActivity extends Activity {
             "Cursive — خط فني مائل"
     };
 
-    private static final String[] TOOL_IDS = new String[]{
-            "undo",
-            "redo",
-            "copy",
-            "paste",
-            "select_all",
-            "auto_format",
-            "signature",
-            "cut",
-            "select_up",
-            "select_down",
-            "datetime"
+    // 12 Editor Tools (11 original + "find_replace" optional)
+    private static final String[] TOOL_IDS = {
+            "undo", "redo", "copy", "paste", "select_all",
+            "auto_format", "signature", "cut", "select_up",
+            "select_down", "datetime", "find_replace"
     };
 
-    private static final String[] TOOL_LABELS = new String[]{
-            "تراجع",
-            "إعادة",
-            "نسخ",
-            "لصق",
-            "تحديد الكل",
-            "تنسيق آلي",
-            "التوقيع",
-            "قص",
-            "تحديد لأعلى",
-            "تحديد لأسفل",
-            "التاريخ والوقت"
+    private static final String[] TOOL_LABELS = {
+            "تراجع", "إعادة", "نسخ", "لصق", "تحديد الكل",
+            "تنسيق آلي", "التوقيع", "قص", "تحديد لأعلى",
+            "تحديد لأسفل", "التاريخ والوقت", "بحث واستبدال"
     };
 
-    private static final String[] TOOL_ICON_RES = new String[]{
-            "ic_undo",
-            "ic_redo",
-            "ic_copy",
-            "ic_paste",
-            "ic_select_all",
-            "ic_auto_format",
-            "ic_signature",
-            "ic_cut",
-            "ic_select_up",
-            "ic_select_down",
-            "ic_datetime"
+    private static final String[] TOOL_ICON_RES = {
+            "ic_undo", "ic_redo", "ic_copy", "ic_paste", "ic_select_all",
+            "ic_auto_format", "ic_signature", "ic_cut", "ic_select_up",
+            "ic_select_down", "ic_datetime", "ic_find_replace"
     };
 
     private static final Set<String> DEFAULT_ENABLED_TOOLS = new HashSet<>(Arrays.asList(
-            "undo",
-            "redo",
-            "copy",
-            "paste",
-            "select_all",
-            "auto_format",
-            "signature"
+            "undo", "redo", "copy", "paste", "select_all", "auto_format", "signature"
     ));
-
-    private static class FileItem implements Comparable<FileItem> {
-        Uri uri;
-        String name;
-        String displayTitle;
-        long lastModified;
-        long size;
-        String cachedContent;
-
-        @Override
-        public int compareTo(FileItem o) {
-            return Long.compare(o.lastModified, this.lastModified);
-        }
-    }
-
-    private enum ScreenState {
-        HOME,
-        READ,
-        EDIT
-    }
-
-    private SharedPreferences prefs;
-    private ThemePalette currentTheme = THEMES[0];
-    private int currentFontIndex = 0;
-    private int currentZoomPercent = 100;
-
-    private Typeface fontAlmaraiReg;
-    private Typeface fontAlmaraiBold;
-    private Typeface fontRuqaaReg;
-    private Typeface fontRuqaaBold;
-    private Typeface fontTajawalReg;
-    private Typeface fontTajawalBold;
-    private Typeface fontKufiReg;
-    private Typeface fontKufiBold;
-
-    private ScreenState currentScreen = ScreenState.HOME;
-    private FrameLayout rootContainer;
-
-    private EditText searchInput;
-    private LinearLayout filesListContainer;
-    private TextView statusEmptyView;
-    private String currentSearchQuery = "";
-    private final List<FileItem> allFiles = new ArrayList<>();
-
-    private FileItem activeFile;
-    private String activeFileContent = "";
-    private EditText documentEditor;
-    private TextView readViewText;
-    private TextView statsBarText;
-    private TextView zoomLabelView;
-    private TextView docTitleView;
-    private LinearLayout toolbarWrapper;
-
-    private final List<String> undoStack = new ArrayList<>();
-    private int undoPointer = -1;
-    private boolean isInternalTextChange = false;
-
-    private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
-    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        try {
-            requestWindowFeature(Window.FEATURE_NO_TITLE);
-        } catch (Throwable ignored) {
-        }
         super.onCreate(savedInstanceState);
+        requestWindowFeature(Window.FEATURE_NO_TITLE);
 
-        try {
-            prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            if (!prefs.getBoolean(KEY_SIGNATURE_INITIALIZED, false)) {
-                prefs.edit()
-                        .putString(KEY_SIGNATURE, DEFAULT_SIGNATURE)
-                        .putBoolean(KEY_SIGNATURE_INITIALIZED, true)
-                        .apply();
+        prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+
+        if (!prefs.getBoolean("sig_init_v3", false)) {
+            prefs.edit()
+                    .putString("custom_signature", DEFAULT_SIGNATURE)
+                    .putBoolean("sig_init_v3", true)
+                    .apply();
+        }
+
+        String savedUri = prefs.getString("folder_uri", null);
+        if (savedUri != null) {
+            try {
+                folderUri = Uri.parse(savedUri);
+            } catch (Exception ignored) {
+                folderUri = null;
             }
+        }
 
-            int themeIdx = prefs.getInt(KEY_THEME_INDEX, 0);
-            if (themeIdx < 0 || themeIdx >= THEMES.length) themeIdx = 0;
-            currentTheme = THEMES[themeIdx];
+        rootContainer = new FrameLayout(this);
+        rootContainer.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        rootContainer.setClipChildren(false);
+        rootContainer.setClipToPadding(false);
+        setContentView(rootContainer);
 
-            currentFontIndex = prefs.getInt(KEY_FONT_INDEX, 0);
-            if (currentFontIndex < 0 || currentFontIndex >= FONT_NAMES.length) currentFontIndex = 0;
+        updateStatusBarColor();
+        showHomeScreen(true);
+    }
 
-            currentZoomPercent = prefs.getInt(KEY_ZOOM_PERCENT, 100);
-            if (currentZoomPercent < 60 || currentZoomPercent > 220) currentZoomPercent = 100;
+    // ==================== DARK MODE & THEME HELPERS ====================
 
-            loadCustomFonts();
+    private boolean isDarkMode() {
+        return prefs.getBoolean("dark_mode", false);
+    }
 
-            rootContainer = new FrameLayout(this);
-            rootContainer.setBackgroundColor(COLOR_BG_MAIN);
-            setContentView(rootContainer);
+    private int getBgColor() {
+        return isDarkMode() ? Color.parseColor("#0F172A") : Color.parseColor("#F4F6F9");
+    }
 
-            applyStatusBarTheme();
-            renderCurrentScreen();
-            refreshFileList();
-        } catch (Throwable t) {
-            showRecoveryScreen(t);
+    private int getCardBgColor() {
+        return isDarkMode() ? Color.parseColor("#1E293B") : Color.WHITE;
+    }
+
+    private int getInputBgColor() {
+        return isDarkMode() ? Color.parseColor("#0F172A") : Color.parseColor("#F8FAFC");
+    }
+
+    private int getSecondaryBtnBgColor() {
+        return isDarkMode() ? Color.parseColor("#263449") : Color.parseColor("#F1F5F9");
+    }
+
+    private int getTextPrimaryColor() {
+        return isDarkMode() ? Color.parseColor("#F1F5F9") : Color.parseColor("#1E293B");
+    }
+
+    private int getTextSecondaryColor() {
+        return isDarkMode() ? Color.parseColor("#94A3B8") : Color.parseColor("#64748B");
+    }
+
+    private int getBorderColor() {
+        return isDarkMode() ? Color.parseColor("#334155") : Color.parseColor("#E2E8F0");
+    }
+
+    private void updateStatusBarColor() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            Window window = getWindow();
+            window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+            window.setStatusBarColor(getDarkHeaderColor());
+            window.setNavigationBarColor(getCardBgColor());
         }
     }
 
-    private void showRecoveryScreen(Throwable t) {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setGravity(Gravity.CENTER);
-        box.setPadding(dp(24), dp(24), dp(24), dp(24));
-        box.setBackgroundColor(COLOR_BG_MAIN);
-
-        TextView msg = new TextView(this);
-        msg.setText("حدث خطأ غير متوقع أثناء التشغيل:\n" + t.toString());
-        msg.setTextColor(COLOR_TEXT_DARK);
-        msg.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        msg.setGravity(Gravity.CENTER);
-        box.addView(msg);
-
-        Button resetBtn = new Button(this);
-        resetBtn.setText("إعادة ضبط الإعدادات وفتح التطبيق");
-        resetBtn.setOnClickListener(v -> {
-            if (prefs != null) prefs.edit().clear().apply();
-            recreate();
-        });
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(48));
-        lp.topMargin = dp(20);
-        box.addView(resetBtn, lp);
-
-        setContentView(box);
+    private int getThemeIndex() {
+        int idx = prefs.getInt("theme_index", 0);
+        if (idx < 0 || idx >= THEMES.length) return 0;
+        return idx;
     }
 
-    private void loadCustomFonts() {
-        fontAlmaraiReg = loadResFont("mazwd_arabic", Typeface.SANS_SERIF, Typeface.NORMAL);
-        fontAlmaraiBold = loadResFont("mazwd_arabic_bold", Typeface.SANS_SERIF, Typeface.BOLD);
-        fontRuqaaReg = loadResFont("aref_ruqaa", Typeface.SERIF, Typeface.NORMAL);
-        fontRuqaaBold = loadResFont("aref_ruqaa_bold", Typeface.SERIF, Typeface.BOLD);
-        fontTajawalReg = loadResFont("tajawal_regular", Typeface.SANS_SERIF, Typeface.NORMAL);
-        fontTajawalBold = loadResFont("tajawal_bold", Typeface.SANS_SERIF, Typeface.BOLD);
-        fontKufiReg = loadResFont("reem_kufi", Typeface.SANS_SERIF, Typeface.NORMAL);
-        fontKufiBold = loadResFont("reem_kufi_bold", Typeface.SANS_SERIF, Typeface.BOLD);
+    private int getPrimaryColor() {
+        return Color.parseColor(THEMES[getThemeIndex()][1]);
     }
 
-    private Typeface loadResFont(String resName, Typeface fallbackFamily, int style) {
+    private int getDarkHeaderColor() {
+        return Color.parseColor(THEMES[getThemeIndex()][2]);
+    }
+
+    private int getLightAccentColor() {
+        if (isDarkMode()) {
+            return Color.parseColor("#283548");
+        }
+        return Color.parseColor(THEMES[getThemeIndex()][3]);
+    }
+
+    private int getAccentTextColor() {
+        return isDarkMode() ? Color.parseColor("#E2E8F0") : getPrimaryColor();
+    }
+
+    private int getFontIndex() {
+        int idx = prefs.getInt("font_index", 0);
+        if (idx < 0 || idx >= FONT_NAMES.length) return 0;
+        return idx;
+    }
+
+    private Typeface getAppTypeface(boolean bold) {
+        return getTypefaceForIndex(getFontIndex(), bold);
+    }
+
+    private Typeface getTypefaceForIndex(int idx, boolean bold) {
+        int style = bold ? Typeface.BOLD : Typeface.NORMAL;
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                int id = getResources().getIdentifier(resName, "font", getPackageName());
-                if (id != 0) {
-                    Typeface tf = getResources().getFont(id);
-                    if (tf != null) return tf;
+                switch (idx) {
+                    case 1: {
+                        String resName = bold ? "tajawal_bold" : "tajawal_regular";
+                        int id = getResources().getIdentifier(resName, "font", getPackageName());
+                        if (id != 0) return getResources().getFont(id);
+                        break;
+                    }
+                    case 2: {
+                        String resName = bold ? "mazwd_arabic_bold" : "mazwd_arabic";
+                        int id = getResources().getIdentifier(resName, "font", getPackageName());
+                        if (id != 0) return getResources().getFont(id);
+                        break;
+                    }
+                    case 3: {
+                        String resName = bold ? "aref_ruqaa_bold" : "aref_ruqaa";
+                        int id = getResources().getIdentifier(resName, "font", getPackageName());
+                        if (id != 0) return getResources().getFont(id);
+                        break;
+                    }
+                    case 4: {
+                        String resName = bold ? "reem_kufi_bold" : "reem_kufi";
+                        int id = getResources().getIdentifier(resName, "font", getPackageName());
+                        if (id != 0) return TypedValueFont(id, style);
+                        break;
+                    }
+                    case 5:
+                        return Typeface.create(Typeface.SERIF, style);
+                    case 6:
+                        return Typeface.create("cursive", style);
+                    default:
+                        return Typeface.create("sans-serif", style);
                 }
             }
-        } catch (Throwable ignored) {
+        } catch (Exception ignored) {
         }
-        return Typeface.create(fallbackFamily, style);
+        return Typeface.create(Typeface.SANS_SERIF, style);
     }
 
-    private Typeface getFontTypefaceForIndex(int index, int style) {
-        boolean isBold = (style == Typeface.BOLD || style == Typeface.BOLD_ITALIC);
-        switch (index) {
-            case 1:
-                return isBold ? fontTajawalBold : fontTajawalReg;
-            case 2:
-                return isBold ? fontAlmaraiBold : fontAlmaraiReg;
-            case 3:
-                return isBold ? fontRuqaaBold : fontRuqaaReg;
-            case 4:
-                return isBold ? fontKufiBold : fontKufiReg;
-            case 5:
-                return Typeface.create(Typeface.SERIF, style);
-            case 6:
-                return Typeface.create("cursive", style);
-            case 0:
-            default:
-                return Typeface.create(Typeface.SANS_SERIF, style);
+    private Typeface TypedValueFont(int resId, int style) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Typeface base = getResources().getFont(resId);
+            return Typeface.create(base, style);
+        }
+        return Typeface.create(Typeface.SANS_SERIF, style);
+    }
+
+    private int getZoomPercent() {
+        return prefs.getInt("zoom_percent", 100);
+    }
+
+    private void setZoomPercent(int percent) {
+        if (percent < 60) percent = 60;
+        if (percent > 220) percent = 220;
+        prefs.edit().putInt("zoom_percent", percent).apply();
+        applyZoomToViews();
+    }
+
+    private float getScaledTextSize() {
+        return 18f * (getZoomPercent() / 100f);
+    }
+
+    private void applyZoomToViews() {
+        float size = getScaledTextSize();
+        if (readTextView != null) {
+            readTextView.setTextSize(TypedValue.COMPLEX_UNIT_SP, size);
+            readTextView.setTypeface(getAppTypeface(false));
+        }
+        if (editorEditText != null) {
+            editorEditText.setTextSize(TypedValue.COMPLEX_UNIT_SP, size);
+            editorEditText.setTypeface(getAppTypeface(false));
+        }
+        if (zoomPercentView != null) {
+            zoomPercentView.setText(getZoomPercent() + "%");
+        }
+        updateSliderPositionFromScroll();
+    }
+
+    private int dp(int value) {
+        return (int) TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP, value, getResources().getDisplayMetrics()
+        );
+    }
+
+    private GradientDrawable roundedRect(int fillColor, int cornerRadiusDp, int strokeWidthDp, int strokeColor) {
+        GradientDrawable gd = new GradientDrawable();
+        gd.setColor(fillColor);
+        gd.setCornerRadius(dp(cornerRadiusDp));
+        if (strokeWidthDp > 0) {
+            gd.setStroke(dp(strokeWidthDp), strokeColor);
+        }
+        return gd;
+    }
+
+    private void configureTextButton(Button btn, String text, float sizeSp, boolean bold, int textColor, int heightDp) {
+        btn.setText(text);
+        btn.setAllCaps(false);
+        btn.setIncludeFontPadding(false);
+        btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp);
+        btn.setTypeface(getAppTypeface(bold));
+        btn.setTextColor(textColor);
+        btn.setGravity(Gravity.CENTER);
+        btn.setPadding(dp(12), 0, dp(12), 0);
+        if (heightDp > 0) {
+            btn.setMinHeight(dp(heightDp));
+            btn.setMinimumHeight(dp(heightDp));
         }
     }
 
-    private Typeface getAppTypeface(int style) {
-        Typeface tf = getFontTypefaceForIndex(currentFontIndex, style);
-        return tf != null ? tf : Typeface.create(Typeface.SANS_SERIF, style);
+    private int getDrawableId(String name) {
+        return getResources().getIdentifier(name, "drawable", getPackageName());
     }
 
-    private void applyStatusBarTheme() {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                Window window = getWindow();
-                if (window != null) {
-                    window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-                    window.setStatusBarColor(currentTheme.primaryDark);
-                    window.setNavigationBarColor(COLOR_CARD_BG);
-                }
-            }
-        } catch (Throwable ignored) {
-        }
-    }
+    // ==================== 1. HOME SCREEN ====================
 
-    private void renderCurrentScreen() {
-        if (rootContainer == null) return;
+    private void showHomeScreen(boolean reloadFiles) {
+        currentScreen = ScreenState.HOME;
+        hideKeyboard();
+        updateStatusBarColor();
         rootContainer.removeAllViews();
-        if (currentScreen == ScreenState.HOME) {
-            rootContainer.addView(buildHomeScreen());
-        } else {
-            rootContainer.addView(buildDocumentScreen());
-        }
-    }
+        rootContainer.setBackgroundColor(getBgColor());
 
-    // =========================================================================
-    // HOME SCREEN
-    // =========================================================================
-
-    private View buildHomeScreen() {
         LinearLayout mainLayout = new LinearLayout(this);
         mainLayout.setOrientation(LinearLayout.VERTICAL);
-        mainLayout.setBackgroundColor(COLOR_BG_MAIN);
         mainLayout.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        mainLayout.setBackgroundColor(getBgColor());
+        mainLayout.setClipChildren(false);
+        mainLayout.setClipToPadding(false);
+        rootContainer.addView(mainLayout, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        // 1. Modern Rounded Hero Card
+        // --- TOP HERO HEADER CARD ---
         LinearLayout heroCard = new LinearLayout(this);
         heroCard.setOrientation(LinearLayout.VERTICAL);
-        heroCard.setGravity(Gravity.CENTER_HORIZONTAL);
         GradientDrawable heroBg = new GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                new int[]{currentTheme.primaryDark, currentTheme.primary}
+                new int[]{getDarkHeaderColor(), getPrimaryColor()}
         );
         float r = dp(24);
         heroBg.setCornerRadii(new float[]{0, 0, 0, 0, r, r, r, r});
         heroCard.setBackground(heroBg);
-        heroCard.setPadding(dp(20), dp(20), dp(20), dp(20));
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            heroCard.setElevation(dp(6));
-        }
+        heroCard.setPadding(dp(20), dp(22), dp(20), dp(22));
+        heroCard.setElevation(dp(6));
 
         TextView titleView = new TextView(this);
         titleView.setText("مفكرة أ. شفيقة مزود");
         titleView.setTextColor(Color.WHITE);
-        titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
-        titleView.setTypeface(getAppTypeface(Typeface.BOLD));
+        titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 23);
+        titleView.setTypeface(getAppTypeface(true));
         titleView.setIncludeFontPadding(false);
-        titleView.setGravity(Gravity.CENTER);
+        titleView.setGravity(Gravity.RIGHT);
         heroCard.addView(titleView);
 
         TextView subtitleView = new TextView(this);
         subtitleView.setText("كاتبة وباحثة في التراث الحضرمي");
-        subtitleView.setTextColor(0xFFE2E8F0);
+        subtitleView.setTextColor(Color.parseColor("#E2E8F0"));
         subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        subtitleView.setTypeface(getAppTypeface(Typeface.NORMAL));
+        subtitleView.setTypeface(getAppTypeface(false));
         subtitleView.setIncludeFontPadding(false);
-        subtitleView.setGravity(Gravity.CENTER);
+        subtitleView.setGravity(Gravity.RIGHT);
         LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         subLp.topMargin = dp(4);
-        subLp.bottomMargin = dp(14);
+        subLp.bottomMargin = dp(16);
         heroCard.addView(subtitleView, subLp);
 
         Button newFileBtn = new Button(this);
-        newFileBtn.setText("＋ ملف جديد");
-        newFileBtn.setAllCaps(false);
-        newFileBtn.setTextColor(currentTheme.primaryDark);
-        newFileBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        newFileBtn.setTypeface(getAppTypeface(Typeface.BOLD));
-        newFileBtn.setIncludeFontPadding(false);
-        newFileBtn.setGravity(Gravity.CENTER);
-        newFileBtn.setBackground(makeRoundedRect(Color.WHITE, dp(14), 0, 0));
-        newFileBtn.setPadding(dp(24), 0, dp(24), 0);
-        newFileBtn.setOnClickListener(v -> showNewFileDialog());
+        configureTextButton(newFileBtn, "＋  ملف جديد", 16, true, getPrimaryColor(), 46);
+        newFileBtn.setBackground(roundedRect(Color.WHITE, 14, 0, 0));
+        newFileBtn.setElevation(dp(2));
+        newFileBtn.setOnClickListener(v -> onNewFileClicked());
         LinearLayout.LayoutParams newBtnLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
         heroCard.addView(newFileBtn, newBtnLp);
@@ -446,757 +477,986 @@ public class MainActivity extends Activity {
         mainLayout.addView(heroCard, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        // 2. Unified Search Box
-        LinearLayout searchCard = new LinearLayout(this);
-        searchCard.setOrientation(LinearLayout.HORIZONTAL);
-        searchCard.setGravity(Gravity.CENTER_VERTICAL);
-        searchCard.setBackground(makeRoundedRect(COLOR_CARD_BG, dp(14), COLOR_BORDER, dp(1)));
-        searchCard.setPadding(dp(14), dp(4), dp(14), dp(4));
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            searchCard.setElevation(dp(2));
-        }
+        // --- SECTION HEADER ("ملفاتي النصية" + "TXT" badge) ---
+        LinearLayout sectionHeader = new LinearLayout(this);
+        sectionHeader.setOrientation(LinearLayout.HORIZONTAL);
+        sectionHeader.setGravity(Gravity.CENTER_VERTICAL);
+        sectionHeader.setPadding(dp(18), dp(14), dp(18), dp(6));
+
+        TextView myFilesTitle = new TextView(this);
+        myFilesTitle.setText("ملفاتي النصية");
+        myFilesTitle.setTextColor(getTextPrimaryColor());
+        myFilesTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        myFilesTitle.setTypeface(getAppTypeface(true));
+        myFilesTitle.setIncludeFontPadding(false);
+        LinearLayout.LayoutParams mftLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        sectionHeader.addView(myFilesTitle, mftLp);
+
+        TextView txtBadge = new TextView(this);
+        txtBadge.setText("TXT");
+        txtBadge.setTextColor(getAccentTextColor());
+        txtBadge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        txtBadge.setTypeface(Typeface.DEFAULT_BOLD);
+        txtBadge.setIncludeFontPadding(false);
+        txtBadge.setBackground(roundedRect(getLightAccentColor(), 8, 0, 0));
+        txtBadge.setPadding(dp(10), dp(4), dp(10), dp(4));
+        sectionHeader.addView(txtBadge);
+
+        mainLayout.addView(sectionHeader);
+
+        // --- UNIFIED SEARCH BAR ---
+        LinearLayout searchBox = new LinearLayout(this);
+        searchBox.setOrientation(LinearLayout.HORIZONTAL);
+        searchBox.setGravity(Gravity.CENTER_VERTICAL);
+        searchBox.setBackground(roundedRect(getCardBgColor(), 14, 1, getBorderColor()));
+        searchBox.setPadding(dp(14), dp(2), dp(14), dp(2));
+        searchBox.setElevation(dp(1));
+        LinearLayout.LayoutParams searchBoxLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(48));
+        searchBoxLp.setMargins(dp(16), dp(4), dp(16), dp(8));
+
+        TextView searchIcon = new TextView(this);
+        searchIcon.setText("🔍");
+        searchIcon.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        searchBox.addView(searchIcon);
 
         searchInput = new EditText(this);
         searchInput.setHint("ابحث في أسماء ومحتوى ملفاتك...");
-        searchInput.setHintTextColor(COLOR_TEXT_MUTED);
-        searchInput.setTextColor(COLOR_TEXT_DARK);
-        searchInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        searchInput.setTypeface(getAppTypeface(Typeface.NORMAL));
+        searchInput.setHintTextColor(getTextSecondaryColor());
+        searchInput.setTextColor(getTextPrimaryColor());
+        searchInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        searchInput.setTypeface(getAppTypeface(false));
         searchInput.setIncludeFontPadding(false);
-        searchInput.setSingleLine(true);
         searchInput.setBackgroundColor(Color.TRANSPARENT);
-        searchInput.setPadding(dp(8), dp(10), dp(8), dp(10));
+        searchInput.setSingleLine(true);
+        searchInput.setPadding(dp(8), 0, dp(8), 0);
         searchInput.setText(currentSearchQuery);
 
-        final TextView clearSearchBtn = new TextView(this);
+        TextView clearSearchBtn = new TextView(this);
         clearSearchBtn.setText("✕");
-        clearSearchBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        clearSearchBtn.setTextColor(COLOR_TEXT_MUTED);
-        clearSearchBtn.setIncludeFontPadding(false);
-        clearSearchBtn.setPadding(dp(8), dp(4), dp(8), dp(4));
+        clearSearchBtn.setTextColor(getTextSecondaryColor());
+        clearSearchBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        clearSearchBtn.setPadding(dp(8), dp(4), dp(4), dp(4));
         clearSearchBtn.setVisibility(currentSearchQuery.isEmpty() ? View.GONE : View.VISIBLE);
         clearSearchBtn.setOnClickListener(v -> {
             searchInput.setText("");
-            hideKeyboard();
+            currentSearchQuery = "";
+            renderHomeFileList();
         });
 
         searchInput.addTextChangedListener(new TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-
-            @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
                 currentSearchQuery = s.toString().trim();
                 clearSearchBtn.setVisibility(currentSearchQuery.isEmpty() ? View.GONE : View.VISIBLE);
-                populateFilesList();
+                renderHomeFileList();
             }
-
-            @Override
-            public void afterTextChanged(Editable s) {}
+            @Override public void afterTextChanged(Editable s) {}
         });
 
-        LinearLayout.LayoutParams sInputLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        searchCard.addView(searchInput, sInputLp);
-        searchCard.addView(clearSearchBtn);
+        LinearLayout.LayoutParams siLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
+        searchBox.addView(searchInput, siLp);
+        searchBox.addView(clearSearchBtn);
+        mainLayout.addView(searchBox, searchBoxLp);
 
-        LinearLayout.LayoutParams searchCardLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        searchCardLp.setMargins(dp(16), dp(14), dp(16), dp(8));
-        mainLayout.addView(searchCard, searchCardLp);
+        // --- SCROLLABLE FILES LIST ---
+        ScrollView filesScroll = new ScrollView(this);
+        filesScroll.setFillViewport(true);
+        homeFilesContainer = new LinearLayout(this);
+        homeFilesContainer.setOrientation(LinearLayout.VERTICAL);
+        homeFilesContainer.setPadding(dp(16), dp(4), dp(16), dp(16));
+        filesScroll.addView(homeFilesContainer);
 
-        // 3. Section Header: "ملفاتي النصية"
-        LinearLayout sectionRow = new LinearLayout(this);
-        sectionRow.setOrientation(LinearLayout.HORIZONTAL);
-        sectionRow.setGravity(Gravity.CENTER_VERTICAL);
-        sectionRow.setPadding(dp(18), dp(4), dp(18), dp(6));
-
-        TextView sectionTitle = new TextView(this);
-        sectionTitle.setText("ملفاتي النصية");
-        sectionTitle.setTextColor(COLOR_TEXT_DARK);
-        sectionTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        sectionTitle.setTypeface(getAppTypeface(Typeface.BOLD));
-        sectionTitle.setIncludeFontPadding(false);
-        LinearLayout.LayoutParams secTitleLp = new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        sectionRow.addView(sectionTitle, secTitleLp);
-
-        TextView badgeView = new TextView(this);
-        badgeView.setText("TXT");
-        badgeView.setTextColor(currentTheme.primary);
-        badgeView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        badgeView.setTypeface(getAppTypeface(Typeface.BOLD));
-        badgeView.setIncludeFontPadding(false);
-        badgeView.setBackground(makeRoundedRect(currentTheme.accentLight, dp(8), 0, 0));
-        badgeView.setPadding(dp(10), dp(3), dp(10), dp(3));
-        sectionRow.addView(badgeView);
-
-        mainLayout.addView(sectionRow);
-
-        // 4. Scrollable Files List Area
-        ScrollView scrollView = new ScrollView(this);
-        scrollView.setFillViewport(true);
-
-        LinearLayout scrollContent = new LinearLayout(this);
-        scrollContent.setOrientation(LinearLayout.VERTICAL);
-        scrollContent.setPadding(dp(16), dp(4), dp(16), dp(16));
-
-        statusEmptyView = new TextView(this);
-        statusEmptyView.setGravity(Gravity.CENTER);
-        statusEmptyView.setTextColor(COLOR_TEXT_MUTED);
-        statusEmptyView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        statusEmptyView.setTypeface(getAppTypeface(Typeface.NORMAL));
-        statusEmptyView.setPadding(dp(20), dp(40), dp(20), dp(40));
-        scrollContent.addView(statusEmptyView);
-
-        filesListContainer = new LinearLayout(this);
-        filesListContainer.setOrientation(LinearLayout.VERTICAL);
-        scrollContent.addView(filesListContainer);
-
-        scrollView.addView(scrollContent);
         LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
-        mainLayout.addView(scrollView, scrollLp);
+        mainLayout.addView(filesScroll, scrollLp);
 
-        // 5. Bottom Action Bar (Settings + Backup ZIP only)
+        // --- BOTTOM BAR (Lifted slightly so bottom rounded corners are 100% visible) ---
         LinearLayout bottomBar = new LinearLayout(this);
         bottomBar.setOrientation(LinearLayout.HORIZONTAL);
         bottomBar.setGravity(Gravity.CENTER_VERTICAL);
-        bottomBar.setBackgroundColor(COLOR_CARD_BG);
-        bottomBar.setPadding(dp(16), dp(10), dp(16), dp(10));
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            bottomBar.setElevation(dp(10));
-        }
+        bottomBar.setBackgroundColor(getCardBgColor());
+        bottomBar.setPadding(dp(14), dp(10), dp(14), dp(14));
+        bottomBar.setElevation(dp(10));
+        bottomBar.setClipToPadding(false);
+        bottomBar.setClipChildren(false);
 
-        Button settingsBtn = createSecondaryButton("⚙ الإعدادات");
+        Button settingsBtn = new Button(this);
+        configureTextButton(settingsBtn, "⚙  الإعدادات", 14, true, getTextPrimaryColor(), 46);
+        settingsBtn.setBackground(roundedRect(getSecondaryBtnBgColor(), 12, 1, getBorderColor()));
+        settingsBtn.setStateListAnimator(null);
+        settingsBtn.setElevation(dp(1));
         settingsBtn.setOnClickListener(v -> showSettingsDialog());
-        LinearLayout.LayoutParams setLp = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        setLp.leftMargin = dp(6);
-        bottomBar.addView(settingsBtn, setLp);
+        LinearLayout.LayoutParams b1Lp = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        b1Lp.leftMargin = dp(6);
+        b1Lp.topMargin = dp(2);
+        b1Lp.bottomMargin = dp(3);
+        bottomBar.addView(settingsBtn, b1Lp);
 
-        Button backupBtn = createPrimaryButton("نسخ احتياطي (ZIP)");
-        backupBtn.setOnClickListener(v -> startBackupFlow());
-        LinearLayout.LayoutParams bakLp = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        bakLp.rightMargin = dp(6);
-        bottomBar.addView(backupBtn, bakLp);
+        Button backupBtn = new Button(this);
+        configureTextButton(backupBtn, "نسخ احتياطي (ZIP)", 14, true, Color.WHITE, 46);
+        backupBtn.setBackground(roundedRect(getPrimaryColor(), 12, 0, 0));
+        backupBtn.setStateListAnimator(null);
+        backupBtn.setElevation(dp(2));
+        backupBtn.setOnClickListener(v -> startBackupZipFlow());
+        LinearLayout.LayoutParams b2Lp = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        b2Lp.rightMargin = dp(6);
+        b2Lp.topMargin = dp(2);
+        b2Lp.bottomMargin = dp(3);
+        bottomBar.addView(backupBtn, b2Lp);
 
         mainLayout.addView(bottomBar, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        populateFilesList();
-        return mainLayout;
+        if (reloadFiles) {
+            loadFilesFromFolder();
+        } else {
+            renderHomeFileList();
+        }
     }
 
-    private void populateFilesList() {
+    private void loadFilesFromFolder() {
+        allFiles.clear();
+        if (folderUri == null) {
+            renderHomeFileList();
+            return;
+        }
+
+        Set<String> pinnedSet = prefs.getStringSet("pinned_files", new HashSet<>());
         try {
-            if (filesListContainer == null || statusEmptyView == null) return;
-            filesListContainer.removeAllViews();
+            String treeDocId = DocumentsContract.getTreeDocumentId(folderUri);
+            Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(folderUri, treeDocId);
 
-            String savedTree = prefs.getString(KEY_TREE_URI, null);
-            if (savedTree == null) {
-                statusEmptyView.setVisibility(View.VISIBLE);
-                statusEmptyView.setText("مرحباً بك في مفكرة أ. شفيقة مزود\n\nللبدء، يرجى اختيار مجلد لحفظ وقراءة ملفاتك النصية (.txt)\nاضغط هنا أو من الإعدادات لاختيار المجلد.");
-                statusEmptyView.setOnClickListener(v -> openFolderPicker());
-                return;
-            }
-            statusEmptyView.setOnClickListener(null);
+            String[] projection = new String[]{
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document.COLUMN_MIME_TYPE,
+                    DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+                    DocumentsContract.Document.COLUMN_SIZE
+            };
 
-            String q = currentSearchQuery.toLowerCase(Locale.ROOT);
-            List<FileItem> filtered = new ArrayList<>();
-            for (FileItem item : allFiles) {
-                if (q.isEmpty()) {
-                    filtered.add(item);
-                } else {
-                    boolean nameMatch = item.displayTitle.toLowerCase(Locale.ROOT).contains(q);
-                    boolean contentMatch = item.cachedContent != null &&
-                            item.cachedContent.toLowerCase(Locale.ROOT).contains(q);
-                    if (nameMatch || contentMatch) {
-                        filtered.add(item);
+            try (Cursor c = getContentResolver().query(childrenUri, projection, null, null, null)) {
+                if (c != null) {
+                    while (c.moveToNext()) {
+                        String docId = c.getString(0);
+                        String name = c.getString(1);
+                        String mime = c.getString(2);
+                        long modified = c.isNull(3) ? 0L : c.getLong(3);
+                        long size = c.isNull(4) ? 0L : c.getLong(4);
+
+                        if (name == null) continue;
+                        if (DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)) continue;
+                        if (!name.toLowerCase(Locale.ROOT).endsWith(".txt")) continue;
+
+                        Uri fileUri = DocumentsContract.buildDocumentUriUsingTree(folderUri, docId);
+                        NoteFile nf = new NoteFile();
+                        nf.uri = fileUri;
+                        nf.name = name;
+                        nf.lastModified = modified;
+                        nf.size = size;
+                        nf.pinned = pinnedSet.contains(fileUri.toString());
+                        nf.cachedContent = contentCache.get(fileUri.toString());
+                        allFiles.add(nf);
                     }
                 }
             }
-
-            if (filtered.isEmpty()) {
-                statusEmptyView.setVisibility(View.VISIBLE);
-                if (q.isEmpty()) {
-                    statusEmptyView.setText("لا توجد ملفات نصية (.txt) في هذا المجلد حتى الآن.\nاضغط على «＋ ملف جديد» بالأعلى لإنشاء أول ملف.");
-                } else {
-                    statusEmptyView.setText("لا توجد نتائج مطابقة لبحثك: «" + currentSearchQuery + "»");
-                }
-                return;
-            }
-
-            statusEmptyView.setVisibility(View.GONE);
-            for (FileItem item : filtered) {
-                filesListContainer.addView(buildFileCard(item, currentSearchQuery));
-            }
-        } catch (Throwable ignored) {
+        } catch (Exception e) {
+            folderUri = null;
         }
+
+        Collections.sort(allFiles, (a, b) -> {
+            if (a.pinned != b.pinned) return a.pinned ? -1 : 1;
+            return Long.compare(b.lastModified, a.lastModified);
+        });
+
+        renderHomeFileList();
     }
 
-    private View buildFileCard(final FileItem item, final String query) {
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(makeRoundedRect(COLOR_CARD_BG, dp(14), COLOR_BORDER, dp(1)));
-        card.setPadding(dp(14), dp(12), dp(14), dp(12));
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            card.setElevation(dp(2));
+    private void renderHomeFileList() {
+        if (homeFilesContainer == null) return;
+        homeFilesContainer.removeAllViews();
+
+        if (folderUri == null) {
+            LinearLayout emptyCard = new LinearLayout(this);
+            emptyCard.setOrientation(LinearLayout.VERTICAL);
+            emptyCard.setGravity(Gravity.CENTER);
+            emptyCard.setBackground(roundedRect(getCardBgColor(), 18, 1, getBorderColor()));
+            emptyCard.setPadding(dp(24), dp(32), dp(24), dp(32));
+
+            TextView msg = new TextView(this);
+            msg.setText("مرحباً بك في مفكرة أ. شفيقة مزود\n\nيرجى اختيار مجلد على هاتفك لحفظ وقراءة ملفاتك النصية (.txt) بأمان.");
+            msg.setTextColor(getTextPrimaryColor());
+            msg.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+            msg.setTypeface(getAppTypeface(false));
+            msg.setGravity(Gravity.CENTER);
+            msg.setLineSpacing(dp(4), 1.1f);
+            emptyCard.addView(msg);
+
+            Button pickBtn = new Button(this);
+            configureTextButton(pickBtn, "📁  اختيار مجلد الملفات", 15, true, Color.WHITE, 46);
+            pickBtn.setBackground(roundedRect(getPrimaryColor(), 12, 0, 0));
+            LinearLayout.LayoutParams pLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, dp(46));
+            pLp.topMargin = dp(18);
+            pickBtn.setPadding(dp(24), 0, dp(24), 0);
+            pickBtn.setOnClickListener(v -> pickFolder());
+            emptyCard.addView(pickBtn, pLp);
+
+            homeFilesContainer.addView(emptyCard);
+            return;
         }
 
-        LinearLayout topRow = new LinearLayout(this);
-        topRow.setOrientation(LinearLayout.HORIZONTAL);
-        topRow.setGravity(Gravity.CENTER_VERTICAL);
+        List<NoteFile> filtered = new ArrayList<>();
+        String q = currentSearchQuery.toLowerCase(Locale.ROOT);
 
-        TextView titleTv = new TextView(this);
-        titleTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        titleTv.setTypeface(getAppTypeface(Typeface.BOLD));
-        titleTv.setTextColor(COLOR_TEXT_DARK);
-        titleTv.setIncludeFontPadding(false);
-        titleTv.setGravity(getTextDirectionGravity(item.displayTitle) | Gravity.CENTER_VERTICAL);
+        for (NoteFile nf : allFiles) {
+            nf.matchSnippet = null;
+            if (q.isEmpty()) {
+                filtered.add(nf);
+            } else {
+                String cleanName = stripTxtExtension(nf.name);
+                boolean nameMatches = cleanName.toLowerCase(Locale.ROOT).contains(q);
 
-        if (!query.isEmpty()) {
-            titleTv.setText(applySearchHighlight(item.displayTitle, query));
-        } else {
-            titleTv.setText(item.displayTitle);
+                if (nf.cachedContent == null) {
+                    nf.cachedContent = readFileContent(nf.uri);
+                    contentCache.put(nf.uri.toString(), nf.cachedContent);
+                }
+                String body = nf.cachedContent != null ? nf.cachedContent : "";
+                int idx = body.toLowerCase(Locale.ROOT).indexOf(q);
+                boolean contentMatches = idx >= 0;
+
+                if (contentMatches) {
+                    int start = Math.max(0, idx - 30);
+                    int end = Math.min(body.length(), idx + q.length() + 45);
+                    String snippet = body.substring(start, end).replace("\n", " ").trim();
+                    if (start > 0) snippet = "..." + snippet;
+                    if (end < body.length()) snippet = snippet + "...";
+                    nf.matchSnippet = snippet;
+                }
+
+                if (nameMatches || contentMatches) {
+                    filtered.add(nf);
+                }
+            }
         }
 
-        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        titleLp.leftMargin = dp(8);
-        topRow.addView(titleTv, titleLp);
-
-        FrameLayout moreBtnContainer = new FrameLayout(this);
-        moreBtnContainer.setBackground(makeRoundedRect(0xFFF1F5F9, dp(10), COLOR_BORDER, dp(1)));
-        ImageView moreIcon = new ImageView(this);
-        int moreId = getDrawableIdByName("ic_more_vert");
-        if (moreId != 0) {
-            moreIcon.setImageResource(moreId);
-            moreIcon.setColorFilter(COLOR_TEXT_DARK);
+        if (filtered.isEmpty()) {
+            TextView emptyText = new TextView(this);
+            emptyText.setText(q.isEmpty()
+                    ? "لا توجد ملفات نصية في هذا المجلد حتى الآن.\nاضغط على (＋ ملف جديد) بالأعلى للبدء."
+                    : "لا توجد نتائج مطابقة للبحث: \"" + currentSearchQuery + "\"");
+            emptyText.setTextColor(getTextSecondaryColor());
+            emptyText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            emptyText.setTypeface(getAppTypeface(false));
+            emptyText.setGravity(Gravity.CENTER);
+            emptyText.setPadding(dp(20), dp(44), dp(20), dp(44));
+            homeFilesContainer.addView(emptyText);
+            return;
         }
-        FrameLayout.LayoutParams iconLp = new FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER);
-        moreBtnContainer.addView(moreIcon, iconLp);
-        moreBtnContainer.setOnClickListener(v -> showFileOptionsDialog(item));
-        LinearLayout.LayoutParams moreContainerLp = new LinearLayout.LayoutParams(dp(36), dp(36));
-        topRow.addView(moreBtnContainer, moreContainerLp);
-
-        card.addView(topRow);
 
         SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd • hh:mm a", new Locale("ar"));
-        String dateStr = sdf.format(new Date(item.lastModified));
-        String sizeStr = formatFileSize(item.size);
 
-        TextView metaTv = new TextView(this);
-        metaTv.setText(dateStr + "   |   " + sizeStr);
-        metaTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        metaTv.setTypeface(getAppTypeface(Typeface.NORMAL));
-        metaTv.setTextColor(COLOR_TEXT_MUTED);
-        metaTv.setIncludeFontPadding(false);
-        LinearLayout.LayoutParams metaLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        metaLp.topMargin = dp(4);
-        card.addView(metaTv, metaLp);
+        for (NoteFile nf : filtered) {
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.HORIZONTAL);
+            card.setGravity(Gravity.CENTER_VERTICAL);
+            int strokeColor = nf.pinned ? getPrimaryColor() : getBorderColor();
+            int strokeWidth = nf.pinned ? 2 : 1;
+            card.setBackground(roundedRect(getCardBgColor(), 14, strokeWidth, strokeColor));
+            card.setPadding(dp(14), dp(12), dp(10), dp(12));
+            card.setElevation(dp(2));
 
-        if (!query.isEmpty() && item.cachedContent != null) {
-            String snippet = extractSearchSnippet(item.cachedContent, query);
-            if (snippet != null) {
-                TextView snippetTv = new TextView(this);
-                snippetTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-                snippetTv.setTypeface(getAppTypeface(Typeface.NORMAL));
-                snippetTv.setTextColor(COLOR_TEXT_DARK);
-                snippetTv.setBackground(makeRoundedRect(0xFFF8FAFC, dp(8), COLOR_BORDER, dp(1)));
-                snippetTv.setPadding(dp(10), dp(6), dp(10), dp(6));
-                snippetTv.setText(applySearchHighlight(snippet, query));
+            LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            cardLp.bottomMargin = dp(10);
+
+            LinearLayout infoCol = new LinearLayout(this);
+            infoCol.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout.LayoutParams infoLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+
+            String displayTitle = (nf.pinned ? "📌 " : "") + stripTxtExtension(nf.name);
+            TextView nameView = new TextView(this);
+            if (!q.isEmpty()) {
+                nameView.setText(highlightSearchMatches(displayTitle, currentSearchQuery));
+            } else {
+                nameView.setText(displayTitle);
+            }
+            nameView.setTextColor(getTextPrimaryColor());
+            nameView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+            nameView.setTypeface(getAppTypeface(true));
+            nameView.setIncludeFontPadding(false);
+            nameView.setTextDirection(View.TEXT_DIRECTION_ANY_RTL);
+            infoCol.addView(nameView);
+
+            String dateStr = nf.lastModified > 0 ? sdf.format(new Date(nf.lastModified)) : "";
+            String sizeStr = formatSize(nf.size);
+            TextView metaView = new TextView(this);
+            metaView.setText(dateStr + "   •   " + sizeStr);
+            metaView.setTextColor(getTextSecondaryColor());
+            metaView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            metaView.setTypeface(getAppTypeface(false));
+            metaView.setIncludeFontPadding(false);
+            metaView.setGravity(Gravity.RIGHT);
+            LinearLayout.LayoutParams metaLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            metaLp.topMargin = dp(4);
+            infoCol.addView(metaView, metaLp);
+
+            if (nf.matchSnippet != null && !q.isEmpty()) {
+                TextView snippetView = new TextView(this);
+                snippetView.setText(highlightSearchMatches(nf.matchSnippet, currentSearchQuery));
+                snippetView.setTextColor(getTextPrimaryColor());
+                snippetView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+                snippetView.setTypeface(getAppTypeface(false));
+                snippetView.setBackground(roundedRect(getInputBgColor(), 8, 1, getBorderColor()));
+                snippetView.setPadding(dp(8), dp(4), dp(8), dp(4));
                 LinearLayout.LayoutParams snipLp = new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                snipLp.topMargin = dp(8);
-                card.addView(snippetTv, snipLp);
+                snipLp.topMargin = dp(6);
+                infoCol.addView(snippetView, snipLp);
             }
+
+            card.addView(infoCol, infoLp);
+
+            // 3-Dots Button
+            FrameLayout moreBtn = new FrameLayout(this);
+            moreBtn.setBackground(roundedRect(getSecondaryBtnBgColor(), 10, 0, 0));
+            ImageView moreIcon = new ImageView(this);
+            int moreDrawableId = getDrawableId("ic_more_vert");
+            if (moreDrawableId != 0) {
+                moreIcon.setImageResource(moreDrawableId);
+                moreIcon.setImageTintList(ColorStateList.valueOf(getTextPrimaryColor()));
+            }
+            FrameLayout.LayoutParams iconLp = new FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER);
+            moreBtn.addView(moreIcon, iconLp);
+
+            LinearLayout.LayoutParams moreLp = new LinearLayout.LayoutParams(dp(38), dp(38));
+            moreLp.rightMargin = dp(8);
+            moreBtn.setOnClickListener(v -> showFileOptionsMenu(nf));
+            card.addView(moreBtn, moreLp);
+
+            card.setOnClickListener(v -> openNoteFile(nf, ScreenState.READ));
+            homeFilesContainer.addView(card, cardLp);
         }
-
-        card.setOnClickListener(v -> openFile(item, query));
-
-        LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        cardLp.bottomMargin = dp(10);
-        card.setLayoutParams(cardLp);
-        return card;
     }
 
-    private void showFileOptionsDialog(final FileItem item) {
-        final Dialog dialog = new Dialog(this);
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+    private Spannable highlightSearchMatches(String text, String query) {
+        SpannableString span = new SpannableString(text);
+        if (query == null || query.isEmpty()) return span;
+        String lowerText = text.toLowerCase(Locale.ROOT);
+        String lowerQuery = query.toLowerCase(Locale.ROOT);
+        int idx = 0;
+        while ((idx = lowerText.indexOf(lowerQuery, idx)) >= 0) {
+            span.setSpan(
+                    new BackgroundColorSpan(0xFFFDE047),
+                    idx,
+                    idx + lowerQuery.length(),
+                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+            );
+            span.setSpan(
+                    new ForegroundColorSpan(Color.parseColor("#0F172A")),
+                    idx,
+                    idx + lowerQuery.length(),
+                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+            );
+            idx += lowerQuery.length();
+        }
+        return span;
+    }
 
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        box.setBackground(makeRoundedRect(COLOR_CARD_BG, dp(18), 0, 0));
-        box.setPadding(dp(20), dp(20), dp(20), dp(16));
+    // ==================== 2. DOCUMENT SCREEN (READ & EDIT + SLIDER + QUICK JUMP) ====================
 
-        TextView header = new TextView(this);
-        header.setText(item.displayTitle);
-        header.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
-        header.setTypeface(getAppTypeface(Typeface.BOLD));
-        header.setTextColor(currentTheme.primaryDark);
-        header.setIncludeFontPadding(false);
-        header.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams hLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        hLp.bottomMargin = dp(14);
-        box.addView(header, hLp);
+    private void openNoteFile(NoteFile file, ScreenState initialMode) {
+        currentFile = file;
+        String content = readFileContent(file.uri);
+        contentCache.put(file.uri.toString(), content);
 
-        String[] actions = new String[]{
-                "فتح للقراءة",
-                "تحرير النص",
-                "إعادة تسمية الملف",
-                "مشاركة الملف",
-                "حذف الملف"
-        };
+        undoStack.clear();
+        undoStack.add(content);
+        undoIndex = 0;
+        isDirty = false;
 
-        for (int i = 0; i < actions.length; i++) {
-            final int idx = i;
-            Button btn = new Button(this);
-            btn.setText(actions[i]);
-            btn.setAllCaps(false);
-            btn.setTypeface(getAppTypeface(Typeface.BOLD));
-            btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-            btn.setIncludeFontPadding(false);
-            btn.setGravity(Gravity.CENTER);
-            if (idx == 4) {
-                btn.setTextColor(0xFFB91C1C);
-                btn.setBackground(makeRoundedRect(0xFFFEF2F2, dp(12), 0xFFFECACA, dp(1)));
+        buildDocumentView(content, initialMode);
+    }
+
+    private void buildDocumentView(String content, ScreenState mode) {
+        currentScreen = mode;
+        updateStatusBarColor();
+        rootContainer.removeAllViews();
+        rootContainer.setBackgroundColor(getBgColor());
+
+        LinearLayout docLayout = new LinearLayout(this);
+        docLayout.setOrientation(LinearLayout.VERTICAL);
+        docLayout.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        docLayout.setBackgroundColor(getBgColor());
+        docLayout.setClipChildren(false);
+        docLayout.setClipToPadding(false);
+        rootContainer.addView(docLayout, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        // --- 1. CLEAN TOP BAR (Back Button + Document Title + Zoom Capsule) ---
+        LinearLayout topBar = new LinearLayout(this);
+        topBar.setOrientation(LinearLayout.HORIZONTAL);
+        topBar.setGravity(Gravity.CENTER_VERTICAL);
+        topBar.setBackgroundColor(getDarkHeaderColor());
+        topBar.setPadding(dp(10), dp(10), dp(10), dp(10));
+        topBar.setElevation(dp(4));
+
+        Button backBtn = new Button(this);
+        configureTextButton(backBtn, "→ رجوع", 13, true, Color.WHITE, 36);
+        backBtn.setBackground(roundedRect(Color.parseColor("#33FFFFFF"), 10, 0, 0));
+        backBtn.setPadding(dp(12), 0, dp(12), 0);
+        backBtn.setOnClickListener(v -> handleBackNavigation());
+        topBar.addView(backBtn, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(36)));
+
+        docTitleView = new TextView(this);
+        docTitleView.setText(stripTxtExtension(currentFile.name));
+        docTitleView.setTextColor(Color.WHITE);
+        docTitleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        docTitleView.setTypeface(getAppTypeface(true));
+        docTitleView.setIncludeFontPadding(false);
+        docTitleView.setSingleLine(true);
+        docTitleView.setEllipsize(TextUtils.TruncateAt.END);
+        docTitleView.setGravity(Gravity.CENTER);
+        docTitleView.setPadding(dp(8), dp(4), dp(8), dp(4));
+        docTitleView.setOnClickListener(v -> showRenameDialog(currentFile));
+        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        topBar.addView(docTitleView, titleLp);
+
+        // Zoom Capsule [ ＋ | 100% | － ]
+        LinearLayout zoomBar = new LinearLayout(this);
+        zoomBar.setOrientation(LinearLayout.HORIZONTAL);
+        zoomBar.setGravity(Gravity.CENTER_VERTICAL);
+        zoomBar.setBackground(roundedRect(Color.parseColor("#28FFFFFF"), 10, 0, 0));
+        zoomBar.setPadding(dp(2), dp(2), dp(2), dp(2));
+
+        TextView zoomInBtn = new TextView(this);
+        zoomInBtn.setText("＋");
+        zoomInBtn.setTextColor(Color.WHITE);
+        zoomInBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        zoomInBtn.setTypeface(Typeface.DEFAULT_BOLD);
+        zoomInBtn.setGravity(Gravity.CENTER);
+        zoomInBtn.setPadding(dp(8), dp(2), dp(8), dp(2));
+        zoomInBtn.setOnClickListener(v -> setZoomPercent(getZoomPercent() + 5));
+
+        zoomPercentView = new TextView(this);
+        zoomPercentView.setText(getZoomPercent() + "%");
+        zoomPercentView.setTextColor(Color.WHITE);
+        zoomPercentView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        zoomPercentView.setTypeface(Typeface.DEFAULT_BOLD);
+        zoomPercentView.setGravity(Gravity.CENTER);
+        zoomPercentView.setPadding(dp(4), dp(2), dp(4), dp(2));
+        zoomPercentView.setOnClickListener(v -> showResetZoomDialog());
+
+        TextView zoomOutBtn = new TextView(this);
+        zoomOutBtn.setText("－");
+        zoomOutBtn.setTextColor(Color.WHITE);
+        zoomOutBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        zoomOutBtn.setTypeface(Typeface.DEFAULT_BOLD);
+        zoomOutBtn.setGravity(Gravity.CENTER);
+        zoomOutBtn.setPadding(dp(8), dp(2), dp(8), dp(2));
+        zoomOutBtn.setOnClickListener(v -> setZoomPercent(getZoomPercent() - 5));
+
+        zoomBar.addView(zoomInBtn);
+        zoomBar.addView(zoomPercentView);
+        zoomBar.addView(zoomOutBtn);
+        topBar.addView(zoomBar);
+
+        docLayout.addView(topBar);
+
+        // --- 2. EDITOR TOOLBAR (Visible in EDIT mode) ---
+        HorizontalScrollView toolbarScroll = new HorizontalScrollView(this);
+        toolbarScroll.setHorizontalScrollBarEnabled(false);
+        toolbarScroll.setBackgroundColor(getCardBgColor());
+        toolbarScroll.setElevation(dp(2));
+
+        editorToolbarContainer = new LinearLayout(this);
+        editorToolbarContainer.setOrientation(LinearLayout.HORIZONTAL);
+        editorToolbarContainer.setGravity(Gravity.CENTER_VERTICAL);
+        editorToolbarContainer.setPadding(dp(8), dp(6), dp(8), dp(6));
+        toolbarScroll.addView(editorToolbarContainer);
+        populateEditorToolbar();
+
+        docLayout.addView(toolbarScroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // --- 3. DOCUMENT PAPER AREA + LEFT SLIDER + QUICK JUMP BUTTON ---
+        FrameLayout paperCard = new FrameLayout(this);
+        paperCard.setBackground(roundedRect(getCardBgColor(), 14, 1, getBorderColor()));
+        paperCard.setElevation(dp(1));
+        LinearLayout.LayoutParams paperLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+        paperLp.setMargins(dp(10), dp(8), dp(10), dp(8));
+
+        // READ ScrollView
+        readScrollView = new ScrollView(this);
+        readScrollView.setFillViewport(true);
+        readTextView = new TextView(this);
+        readTextView.setTextColor(getTextPrimaryColor());
+        readTextView.setTextSize(TypedValue.COMPLEX_UNIT_SP, getScaledTextSize());
+        readTextView.setTypeface(getAppTypeface(false));
+        readTextView.setLineSpacing(dp(6), 1.15f);
+        readTextView.setPadding(dp(28), dp(18), dp(18), dp(28));
+        readTextView.setTextIsSelectable(true);
+        readTextView.setTextDirection(View.TEXT_DIRECTION_ANY_RTL);
+        readScrollView.addView(readTextView);
+
+        // EDIT EditText
+        editorEditText = new EditText(this);
+        editorEditText.setText(content);
+        editorEditText.setTextColor(getTextPrimaryColor());
+        editorEditText.setTextSize(TypedValue.COMPLEX_UNIT_SP, getScaledTextSize());
+        editorEditText.setTypeface(getAppTypeface(false));
+        editorEditText.setLineSpacing(dp(6), 1.15f);
+        editorEditText.setGravity(Gravity.TOP | Gravity.RIGHT);
+        editorEditText.setTextDirection(View.TEXT_DIRECTION_ANY_RTL);
+        editorEditText.setBackgroundColor(Color.TRANSPARENT);
+        editorEditText.setPadding(dp(28), dp(18), dp(18), dp(28));
+        editorEditText.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+
+        editorEditText.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                String current = s.toString();
+                updateStatsBar(current);
+                isDirty = true;
+                if (!isUndoRedoAction) {
+                    recordUndoState(current);
+                }
+                scheduleAutoSave();
+                updateSliderPositionFromScroll();
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+
+        paperCard.addView(readScrollView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        paperCard.addView(editorEditText, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        // --- LEFT FAST SCROLL SLIDER ---
+        buildLeftFastSlider(paperCard);
+
+        // --- QUICK JUMP FLOATING BUTTON & MINI MENU (LIKE TEXTPAD) ---
+        buildQuickJumpOverlay(paperCard);
+
+        docLayout.addView(paperCard, paperLp);
+
+        // --- 4. BOTTOM STATS BAR + READ ACTION BAR ---
+        LinearLayout bottomControlsContainer = new LinearLayout(this);
+        bottomControlsContainer.setOrientation(LinearLayout.VERTICAL);
+        bottomControlsContainer.setBackgroundColor(getCardBgColor());
+        bottomControlsContainer.setElevation(dp(8));
+        bottomControlsContainer.setClipChildren(false);
+        bottomControlsContainer.setClipToPadding(false);
+
+        statsBarView = new TextView(this);
+        statsBarView.setTextColor(getTextSecondaryColor());
+        statsBarView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        statsBarView.setTypeface(getAppTypeface(true));
+        statsBarView.setIncludeFontPadding(false);
+        statsBarView.setGravity(Gravity.CENTER);
+        statsBarView.setPadding(dp(12), dp(8), dp(12), dp(6));
+        boolean showStats = prefs.getBoolean("show_stats_bar", true);
+        statsBarView.setVisibility(showStats ? View.VISIBLE : View.GONE);
+        bottomControlsContainer.addView(statsBarView);
+
+        readActionBar = new LinearLayout(this);
+        readActionBar.setOrientation(LinearLayout.HORIZONTAL);
+        readActionBar.setGravity(Gravity.CENTER_VERTICAL);
+        readActionBar.setPadding(dp(14), dp(6), dp(14), dp(14));
+        readActionBar.setClipChildren(false);
+        readActionBar.setClipToPadding(false);
+
+        Button editModeBtn = new Button(this);
+        configureTextButton(editModeBtn, "تحرير الملف", 15, true, Color.WHITE, 46);
+        editModeBtn.setBackground(roundedRect(getPrimaryColor(), 12, 0, 0));
+        editModeBtn.setStateListAnimator(null);
+        editModeBtn.setElevation(dp(2));
+        editModeBtn.setOnClickListener(v -> switchDocumentMode(ScreenState.EDIT));
+        LinearLayout.LayoutParams ebLp = new LinearLayout.LayoutParams(0, dp(46), 1.3f);
+        ebLp.leftMargin = dp(6);
+        ebLp.topMargin = dp(2);
+        ebLp.bottomMargin = dp(3);
+        readActionBar.addView(editModeBtn, ebLp);
+
+        Button shareFileBtn = new Button(this);
+        configureTextButton(shareFileBtn, "مشاركة الملف", 14, true, getTextPrimaryColor(), 46);
+        shareFileBtn.setBackground(roundedRect(getSecondaryBtnBgColor(), 12, 1, getBorderColor()));
+        shareFileBtn.setStateListAnimator(null);
+        shareFileBtn.setElevation(dp(1));
+        shareFileBtn.setOnClickListener(v -> shareTextContent(currentFile.name, editorEditText.getText().toString()));
+        LinearLayout.LayoutParams sbLp = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        sbLp.rightMargin = dp(6);
+        sbLp.topMargin = dp(2);
+        sbLp.bottomMargin = dp(3);
+        readActionBar.addView(shareFileBtn, sbLp);
+
+        bottomControlsContainer.addView(readActionBar);
+        docLayout.addView(bottomControlsContainer, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        updateStatsBar(content);
+        switchDocumentMode(mode);
+    }
+
+    // ==================== LEFT FAST SCROLL SLIDER ====================
+
+    private void buildLeftFastSlider(FrameLayout paperCard) {
+        sliderTouchContainer = new FrameLayout(this);
+        sliderTouchContainer.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
+        sliderTouchContainer.setAlpha(0.38f);
+
+        // Subtle vertical track line
+        View trackLine = new View(this);
+        trackLine.setBackground(roundedRect(getBorderColor(), 2, 0, 0));
+        FrameLayout.LayoutParams trackLp = new FrameLayout.LayoutParams(
+                dp(3), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER_HORIZONTAL);
+        trackLp.topMargin = dp(14);
+        trackLp.bottomMargin = dp(14);
+        sliderTouchContainer.addView(trackLine, trackLp);
+
+        // Draggable Pill Thumb
+        sliderThumb = new View(this);
+        sliderThumb.setBackground(roundedRect(getPrimaryColor(), 6, 1, Color.WHITE));
+        sliderThumb.setElevation(dp(3));
+        FrameLayout.LayoutParams thumbLp = new FrameLayout.LayoutParams(
+                dp(8), dp(46), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        thumbLp.topMargin = dp(14);
+        sliderTouchContainer.addView(sliderThumb, thumbLp);
+
+        FrameLayout.LayoutParams containerLp = new FrameLayout.LayoutParams(
+                dp(26), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.LEFT | Gravity.TOP);
+        paperCard.addView(sliderTouchContainer, containerLp);
+
+        // Percentage Bubble next to thumb
+        sliderBubble = new TextView(this);
+        sliderBubble.setText("0%");
+        sliderBubble.setTextColor(Color.WHITE);
+        sliderBubble.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        sliderBubble.setTypeface(Typeface.DEFAULT_BOLD);
+        sliderBubble.setGravity(Gravity.CENTER);
+        sliderBubble.setBackground(roundedRect(getPrimaryColor(), 10, 0, 0));
+        sliderBubble.setPadding(dp(10), dp(4), dp(10), dp(4));
+        sliderBubble.setElevation(dp(6));
+        sliderBubble.setVisibility(View.GONE);
+        FrameLayout.LayoutParams bubbleLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.LEFT | Gravity.TOP);
+        bubbleLp.leftMargin = dp(32);
+        bubbleLp.topMargin = dp(14);
+        paperCard.addView(sliderBubble, bubbleLp);
+
+        boolean showSlider = prefs.getBoolean("show_fast_slider", true);
+        sliderTouchContainer.setVisibility(showSlider ? View.VISIBLE : View.GONE);
+
+        sliderTouchContainer.setOnTouchListener((v, event) -> {
+            if (jumpMenuCard != null) jumpMenuCard.setVisibility(View.GONE);
+            int action = event.getActionMasked();
+            float pad = dp(14);
+            float thumbH = dp(46);
+            float usableH = Math.max(1f, v.getHeight() - (2f * pad) - thumbH);
+
+            if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_MOVE) {
+                isSliderDragging = true;
+                sliderFadeHandler.removeCallbacks(sliderFadeRunnable);
+                sliderTouchContainer.setAlpha(1.0f);
+
+                float y = event.getY() - pad - (thumbH / 2f);
+                float fraction = Math.max(0f, Math.min(1f, y / usableH));
+                sliderThumb.setTranslationY(fraction * usableH);
+
+                if (sliderBubble != null) {
+                    sliderBubble.setText(Math.round(fraction * 100f) + "%");
+                    sliderBubble.setVisibility(View.VISIBLE);
+                    sliderBubble.setTranslationY(fraction * usableH);
+                }
+
+                scrollDocumentToFraction(fraction);
+                v.getParent().requestDisallowInterceptTouchEvent(true);
+                return true;
+            } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                isSliderDragging = false;
+                if (sliderBubble != null) sliderBubble.setVisibility(View.GONE);
+                sliderFadeHandler.postDelayed(sliderFadeRunnable, 1400);
+                return true;
+            }
+            return false;
+        });
+
+        readScrollView.setOnScrollChangeListener((v, scrollX, scrollY, oldScrollX, oldScrollY) -> {
+            if (currentScreen == ScreenState.READ && !isSliderDragging) {
+                updateSliderPositionFromScroll();
+            }
+            if (jumpMenuCard != null && jumpMenuCard.getVisibility() == View.VISIBLE) {
+                jumpMenuCard.setVisibility(View.GONE);
+            }
+        });
+
+        editorEditText.setOnScrollChangeListener((v, scrollX, scrollY, oldScrollX, oldScrollY) -> {
+            if (currentScreen == ScreenState.EDIT && !isSliderDragging) {
+                updateSliderPositionFromScroll();
+            }
+            if (jumpMenuCard != null && jumpMenuCard.getVisibility() == View.VISIBLE) {
+                jumpMenuCard.setVisibility(View.GONE);
+            }
+        });
+    }
+
+    private int getReadMaxScroll() {
+        if (readScrollView == null || readTextView == null) return 0;
+        return Math.max(0, readTextView.getHeight() - readScrollView.getHeight());
+    }
+
+    private int getEditorMaxScroll() {
+        if (editorEditText == null) return 0;
+        Layout layout = editorEditText.getLayout();
+        if (layout == null) return 0;
+        int totalH = layout.getHeight() + editorEditText.getTotalPaddingTop() + editorEditText.getTotalPaddingBottom();
+        return Math.max(0, totalH - editorEditText.getHeight());
+    }
+
+    private void scrollDocumentToFraction(float fraction) {
+        if (currentScreen == ScreenState.READ) {
+            int max = getReadMaxScroll();
+            readScrollView.scrollTo(0, Math.round(fraction * max));
+        } else if (currentScreen == ScreenState.EDIT) {
+            int max = getEditorMaxScroll();
+            editorEditText.scrollTo(0, Math.round(fraction * max));
+        }
+    }
+
+    private void updateSliderPositionFromScroll() {
+        if (sliderTouchContainer == null || sliderThumb == null || isSliderDragging) return;
+        if (sliderTouchContainer.getVisibility() != View.VISIBLE) return;
+
+        sliderTouchContainer.post(() -> {
+            if (isSliderDragging) return;
+            int max;
+            int cur;
+            if (currentScreen == ScreenState.READ) {
+                max = getReadMaxScroll();
+                cur = readScrollView != null ? readScrollView.getScrollY() : 0;
             } else {
-                btn.setTextColor(COLOR_TEXT_DARK);
-                btn.setBackground(makeRoundedRect(0xFFF8FAFC, dp(12), COLOR_BORDER, dp(1)));
+                max = getEditorMaxScroll();
+                cur = editorEditText != null ? editorEditText.getScrollY() : 0;
             }
-            LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
-            bLp.bottomMargin = dp(8);
-            btn.setOnClickListener(v -> {
-                dialog.dismiss();
-                if (idx == 0) {
-                    openFile(item, currentSearchQuery);
-                } else if (idx == 1) {
-                    openFile(item, currentSearchQuery);
-                    currentScreen = ScreenState.EDIT;
-                    renderCurrentScreen();
-                } else if (idx == 2) {
-                    showRenameDialog(item, false);
-                } else if (idx == 3) {
-                    activeFile = item;
-                    activeFileContent = item.cachedContent != null ? item.cachedContent : readTextFromUri(item.uri);
-                    shareCurrentDocument();
-                } else if (idx == 4) {
-                    showDeleteConfirmDialog(item);
-                }
-            });
-            box.addView(btn, bLp);
+            float fraction = max > 0 ? Math.max(0f, Math.min(1f, (float) cur / max)) : 0f;
+            float pad = dp(14);
+            float thumbH = dp(46);
+            float usableH = Math.max(1f, sliderTouchContainer.getHeight() - (2f * pad) - thumbH);
+            sliderThumb.setTranslationY(fraction * usableH);
+
+            sliderFadeHandler.removeCallbacks(sliderFadeRunnable);
+            sliderTouchContainer.setAlpha(0.9f);
+            sliderFadeHandler.postDelayed(sliderFadeRunnable, 1200);
+        });
+    }
+
+    // ==================== QUICK JUMP BUTTON (TOP / BOTTOM LIKE TEXTPAD) ====================
+
+    private void buildQuickJumpOverlay(FrameLayout paperCard) {
+        // Floating Mini Menu Card (appears above button when tapped)
+        jumpMenuCard = new LinearLayout(this);
+        jumpMenuCard.setOrientation(LinearLayout.VERTICAL);
+        jumpMenuCard.setBackground(roundedRect(getCardBgColor(), 12, 1, getBorderColor()));
+        jumpMenuCard.setElevation(dp(8));
+        jumpMenuCard.setPadding(dp(4), dp(4), dp(4), dp(4));
+        jumpMenuCard.setVisibility(View.GONE);
+
+        TextView jumpTopItem = new TextView(this);
+        jumpTopItem.setText("↑  أول المستند");
+        jumpTopItem.setTextColor(getTextPrimaryColor());
+        jumpTopItem.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        jumpTopItem.setTypeface(getAppTypeface(true));
+        jumpTopItem.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        jumpTopItem.setPadding(dp(14), dp(10), dp(14), dp(10));
+        jumpTopItem.setOnClickListener(v -> {
+            jumpMenuCard.setVisibility(View.GONE);
+            jumpToDocumentTop();
+        });
+        jumpMenuCard.addView(jumpTopItem);
+
+        View divider = new View(this);
+        divider.setBackgroundColor(getBorderColor());
+        jumpMenuCard.addView(divider, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+
+        TextView jumpBottomItem = new TextView(this);
+        jumpBottomItem.setText("↓  آخر المستند");
+        jumpBottomItem.setTextColor(getTextPrimaryColor());
+        jumpBottomItem.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        jumpBottomItem.setTypeface(getAppTypeface(true));
+        jumpBottomItem.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        jumpBottomItem.setPadding(dp(14), dp(10), dp(14), dp(10));
+        jumpBottomItem.setOnClickListener(v -> {
+            jumpMenuCard.setVisibility(View.GONE);
+            jumpToDocumentBottom();
+        });
+        jumpMenuCard.addView(jumpBottomItem);
+
+        FrameLayout.LayoutParams menuLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM | Gravity.LEFT);
+        menuLp.leftMargin = dp(30);
+        menuLp.bottomMargin = dp(60);
+        paperCard.addView(jumpMenuCard, menuLp);
+
+        // Floating Quick Jump Button
+        FrameLayout jumpBtnContainer = new FrameLayout(this);
+        jumpBtnContainer.setBackground(roundedRect(getSecondaryBtnBgColor(), 20, 1, getBorderColor()));
+        jumpBtnContainer.setElevation(dp(4));
+        jumpBtnContainer.setAlpha(0.88f);
+
+        ImageView jumpIcon = new ImageView(this);
+        int jumpIconId = getDrawableId("ic_jump_vertical");
+        if (jumpIconId != 0) {
+            jumpIcon.setImageResource(jumpIconId);
+            jumpIcon.setImageTintList(ColorStateList.valueOf(getAccentTextColor()));
+            FrameLayout.LayoutParams icLp = new FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER);
+            jumpBtnContainer.addView(jumpIcon, icLp);
+        } else {
+            TextView fallbackArrow = new TextView(this);
+            fallbackArrow.setText("⇅");
+            fallbackArrow.setTextColor(getAccentTextColor());
+            fallbackArrow.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+            fallbackArrow.setGravity(Gravity.CENTER);
+            jumpBtnContainer.addView(fallbackArrow);
         }
 
-        dialog.setContentView(box);
-        styleDialogWindow(dialog);
-        dialog.show();
-    }
-
-    // =========================================================================
-    // SETTINGS & CUSTOMIZATION DIALOGS
-    // =========================================================================
-
-    private void showSettingsDialog() {
-        final Dialog dialog = new Dialog(this);
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-
-        ScrollView scroll = new ScrollView(this);
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        card.setBackground(makeRoundedRect(COLOR_CARD_BG, dp(20), 0, 0));
-        card.setPadding(dp(20), dp(20), dp(20), dp(20));
-
-        TextView title = new TextView(this);
-        title.setText("⚙ إعدادات المفكرة");
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 19);
-        title.setTypeface(getAppTypeface(Typeface.BOLD));
-        title.setTextColor(currentTheme.primaryDark);
-        title.setIncludeFontPadding(false);
-        title.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams tLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        tLp.bottomMargin = dp(18);
-        card.addView(title, tLp);
-
-        // 1. Theme Selector (Single Dropdown Box)
-        TextView themeTitle = new TextView(this);
-        themeTitle.setText("المظهر اللوني للتطبيق:");
-        themeTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        themeTitle.setTypeface(getAppTypeface(Typeface.BOLD));
-        themeTitle.setTextColor(COLOR_TEXT_DARK);
-        themeTitle.setIncludeFontPadding(false);
-        LinearLayout.LayoutParams ttLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        ttLp.bottomMargin = dp(8);
-        card.addView(themeTitle, ttLp);
-
-        LinearLayout themeDropdownBox = new LinearLayout(this);
-        themeDropdownBox.setOrientation(LinearLayout.HORIZONTAL);
-        themeDropdownBox.setGravity(Gravity.CENTER_VERTICAL);
-        themeDropdownBox.setBackground(makeRoundedRect(0xFFF8FAFC, dp(12), COLOR_BORDER, dp(1)));
-        themeDropdownBox.setPadding(dp(14), dp(12), dp(14), dp(12));
-
-        View colorDot = new View(this);
-        colorDot.setBackground(makeCircle(currentTheme.primary, 0, 0));
-        LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dp(18), dp(18));
-        dotLp.leftMargin = dp(10);
-        themeDropdownBox.addView(colorDot, dotLp);
-
-        TextView themeDropdownText = new TextView(this);
-        themeDropdownText.setText(currentTheme.name);
-        themeDropdownText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        themeDropdownText.setTypeface(getAppTypeface(Typeface.BOLD));
-        themeDropdownText.setTextColor(COLOR_TEXT_DARK);
-        themeDropdownText.setIncludeFontPadding(false);
-        LinearLayout.LayoutParams tdTextLp = new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        themeDropdownBox.addView(themeDropdownText, tdTextLp);
-
-        TextView themeArrow = new TextView(this);
-        themeArrow.setText("▼");
-        themeArrow.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        themeArrow.setTextColor(COLOR_TEXT_MUTED);
-        themeArrow.setIncludeFontPadding(false);
-        themeDropdownBox.addView(themeArrow);
-
-        themeDropdownBox.setOnClickListener(v -> showThemeDropdownDialog(dialog));
-
-        LinearLayout.LayoutParams themeBoxLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        themeBoxLp.bottomMargin = dp(16);
-        card.addView(themeDropdownBox, themeBoxLp);
-
-        // 2. Font Selector (Single Dropdown Box with zero top gap)
-        TextView fontTitle = new TextView(this);
-        fontTitle.setText("نوع الخط في التطبيق والمحرر:");
-        fontTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        fontTitle.setTypeface(getAppTypeface(Typeface.BOLD));
-        fontTitle.setTextColor(COLOR_TEXT_DARK);
-        fontTitle.setIncludeFontPadding(false);
-        LinearLayout.LayoutParams ftLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        ftLp.bottomMargin = dp(8);
-        card.addView(fontTitle, ftLp);
-
-        LinearLayout fontDropdownBox = new LinearLayout(this);
-        fontDropdownBox.setOrientation(LinearLayout.HORIZONTAL);
-        fontDropdownBox.setGravity(Gravity.CENTER_VERTICAL);
-        fontDropdownBox.setBackground(makeRoundedRect(0xFFF8FAFC, dp(12), COLOR_BORDER, dp(1)));
-        fontDropdownBox.setPadding(dp(14), dp(12), dp(14), dp(12));
-
-        final TextView fontDropdownText = new TextView(this);
-        fontDropdownText.setText(FONT_NAMES[currentFontIndex]);
-        fontDropdownText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        fontDropdownText.setTypeface(getFontTypefaceForIndex(currentFontIndex, Typeface.BOLD));
-        fontDropdownText.setTextColor(COLOR_TEXT_DARK);
-        fontDropdownText.setIncludeFontPadding(false);
-        LinearLayout.LayoutParams fdTextLp = new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        fontDropdownBox.addView(fontDropdownText, fdTextLp);
-
-        TextView fontArrow = new TextView(this);
-        fontArrow.setText("▼");
-        fontArrow.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        fontArrow.setTextColor(COLOR_TEXT_MUTED);
-        fontArrow.setIncludeFontPadding(false);
-        fontDropdownBox.addView(fontArrow);
-
-        fontDropdownBox.setOnClickListener(v -> showFontDropdownDialog(fontDropdownText, dialog));
-
-        LinearLayout.LayoutParams fontBoxLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        fontBoxLp.bottomMargin = dp(16);
-        card.addView(fontDropdownBox, fontBoxLp);
-
-        // 3. Customize Editor Toolbar & Display Mode
-        TextView toolsTitle = new TextView(this);
-        toolsTitle.setText("شريط أدوات التحرير:");
-        toolsTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        toolsTitle.setTypeface(getAppTypeface(Typeface.BOLD));
-        toolsTitle.setTextColor(COLOR_TEXT_DARK);
-        toolsTitle.setIncludeFontPadding(false);
-        LinearLayout.LayoutParams tltLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        tltLp.bottomMargin = dp(8);
-        card.addView(toolsTitle, tltLp);
-
-        LinearLayout iconModeRow = new LinearLayout(this);
-        iconModeRow.setOrientation(LinearLayout.HORIZONTAL);
-        iconModeRow.setGravity(Gravity.CENTER_VERTICAL);
-        iconModeRow.setBackground(makeRoundedRect(0xFFF8FAFC, dp(12), COLOR_BORDER, dp(1)));
-        iconModeRow.setPadding(dp(12), dp(10), dp(12), dp(10));
-
-        TextView iconModeLabel = new TextView(this);
-        iconModeLabel.setText("عرض أيقونات فقط بدون نص في شريط التحرير");
-        iconModeLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        iconModeLabel.setTypeface(getAppTypeface(Typeface.BOLD));
-        iconModeLabel.setTextColor(COLOR_TEXT_DARK);
-        iconModeLabel.setIncludeFontPadding(false);
-        LinearLayout.LayoutParams imlLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        iconModeRow.addView(iconModeLabel, imlLp);
-
-        final Switch iconModeSwitch = new Switch(this);
-        iconModeSwitch.setChecked(prefs.getBoolean(KEY_TOOLBAR_ICONS_ONLY, false));
-        iconModeSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            prefs.edit().putBoolean(KEY_TOOLBAR_ICONS_ONLY, isChecked).apply();
-            if (currentScreen == ScreenState.EDIT) {
-                renderCurrentScreen();
+        jumpBtnContainer.setOnClickListener(v -> {
+            if (jumpMenuCard.getVisibility() == View.VISIBLE) {
+                jumpMenuCard.setVisibility(View.GONE);
+            } else {
+                jumpMenuCard.setVisibility(View.VISIBLE);
             }
         });
-        iconModeRow.addView(iconModeSwitch);
 
-        LinearLayout.LayoutParams imRowLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        imRowLp.bottomMargin = dp(8);
-        card.addView(iconModeRow, imRowLp);
+        FrameLayout.LayoutParams btnLp = new FrameLayout.LayoutParams(
+                dp(38), dp(38), Gravity.BOTTOM | Gravity.LEFT);
+        btnLp.leftMargin = dp(30);
+        btnLp.bottomMargin = dp(14);
+        paperCard.addView(jumpBtnContainer, btnLp);
+        jumpButton = jumpBtnContainer;
 
-        Button customizeToolbarBtn = createSecondaryButton("تخصيص وترتيب أدوات التحرير");
-        customizeToolbarBtn.setOnClickListener(v -> showCustomizeToolbarDialog());
-        LinearLayout.LayoutParams ctbLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
-        ctbLp.bottomMargin = dp(16);
-        card.addView(customizeToolbarBtn, ctbLp);
-
-        // 4. Custom Signature Input
-        TextView sigTitle = new TextView(this);
-        sigTitle.setText("التوقيع المخصص (يُدرج بزر التوقيع):");
-        sigTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        sigTitle.setTypeface(getAppTypeface(Typeface.BOLD));
-        sigTitle.setTextColor(COLOR_TEXT_DARK);
-        sigTitle.setIncludeFontPadding(false);
-        LinearLayout.LayoutParams stLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        stLp.bottomMargin = dp(6);
-        card.addView(sigTitle, stLp);
-
-        final EditText sigInput = new EditText(this);
-        sigInput.setText(prefs.getString(KEY_SIGNATURE, ""));
-        sigInput.setHint(SIGNATURE_HINT);
-        sigInput.setHintTextColor(COLOR_TEXT_MUTED);
-        sigInput.setTextColor(COLOR_TEXT_DARK);
-        sigInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        sigInput.setTypeface(getAppTypeface(Typeface.NORMAL));
-        sigInput.setBackground(makeRoundedRect(0xFFF8FAFC, dp(12), COLOR_BORDER, dp(1)));
-        sigInput.setPadding(dp(12), dp(10), dp(12), dp(10));
-        LinearLayout.LayoutParams siLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        siLp.bottomMargin = dp(16);
-        card.addView(sigInput, siLp);
-
-        // 5. Change Storage Folder Button
-        Button folderBtn = createSecondaryButton("تغيير مجلد حفظ الملفات");
-        folderBtn.setOnClickListener(v -> {
-            prefs.edit().putString(KEY_SIGNATURE, sigInput.getText().toString().trim()).apply();
-            dialog.dismiss();
-            openFolderPicker();
-        });
-        LinearLayout.LayoutParams fbLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
-        fbLp.bottomMargin = dp(12);
-        card.addView(folderBtn, fbLp);
-
-        // 6. Save & Close Button
-        Button closeBtn = createPrimaryButton("حفظ وإغلاق");
-        closeBtn.setOnClickListener(v -> {
-            String newSig = sigInput.getText().toString().trim();
-            prefs.edit().putString(KEY_SIGNATURE, newSig).apply();
-            dialog.dismiss();
-            Toast.makeText(this, "تم حفظ الإعدادات", Toast.LENGTH_SHORT).show();
-        });
-        card.addView(closeBtn, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(46)));
-
-        scroll.addView(card);
-        dialog.setContentView(scroll);
-        styleDialogWindow(dialog);
-        dialog.show();
+        boolean showJump = prefs.getBoolean("show_jump_btn", true);
+        jumpButton.setVisibility(showJump ? View.VISIBLE : View.GONE);
     }
 
-    private void showThemeDropdownDialog(final Dialog parentSettingsDialog) {
-        final Dialog d = new Dialog(this);
-        d.requestWindowFeature(Window.FEATURE_NO_TITLE);
-
-        ScrollView scroll = new ScrollView(this);
-        LinearLayout list = new LinearLayout(this);
-        list.setOrientation(LinearLayout.VERTICAL);
-        list.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        list.setBackground(makeRoundedRect(COLOR_CARD_BG, dp(16), COLOR_BORDER, dp(1)));
-        list.setPadding(dp(10), dp(10), dp(10), dp(10));
-
-        int currentIdx = prefs.getInt(KEY_THEME_INDEX, 0);
-
-        for (int i = 0; i < THEMES.length; i++) {
-            final int idx = i;
-            final ThemePalette palette = THEMES[i];
-            boolean isSelected = (idx == currentIdx);
-
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setBackground(makeRoundedRect(
-                    isSelected ? palette.accentLight : Color.TRANSPARENT,
-                    dp(10),
-                    isSelected ? palette.primary : 0,
-                    isSelected ? dp(1) : 0
-            ));
-            row.setPadding(dp(12), dp(12), dp(12), dp(12));
-
-            View dot = new View(this);
-            dot.setBackground(makeCircle(palette.primary, 0, 0));
-            LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dp(18), dp(18));
-            dotLp.leftMargin = dp(12);
-            row.addView(dot, dotLp);
-
-            TextView label = new TextView(this);
-            label.setText(palette.name);
-            label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-            label.setTypeface(getAppTypeface(isSelected ? Typeface.BOLD : Typeface.NORMAL));
-            label.setTextColor(isSelected ? palette.primaryDark : COLOR_TEXT_DARK);
-            label.setIncludeFontPadding(false);
-            LinearLayout.LayoutParams lLp = new LinearLayout.LayoutParams(
-                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-            row.addView(label, lLp);
-
-            if (isSelected) {
-                TextView check = new TextView(this);
-                check.setText("✓");
-                check.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-                check.setTypeface(getAppTypeface(Typeface.BOLD));
-                check.setTextColor(palette.primary);
-                check.setIncludeFontPadding(false);
-                row.addView(check);
-            }
-
-            row.setOnClickListener(v -> {
-                prefs.edit().putInt(KEY_THEME_INDEX, idx).apply();
-                currentTheme = THEMES[idx];
-                d.dismiss();
-                if (parentSettingsDialog != null && parentSettingsDialog.isShowing()) {
-                    parentSettingsDialog.dismiss();
-                }
-                applyStatusBarTheme();
-                renderCurrentScreen();
-                showSettingsDialog();
-            });
-
-            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            if (i < THEMES.length - 1) rowLp.bottomMargin = dp(4);
-            list.addView(row, rowLp);
+    private void jumpToDocumentTop() {
+        if (currentScreen == ScreenState.READ) {
+            readScrollView.post(() -> readScrollView.smoothScrollTo(0, 0));
+        } else if (currentScreen == ScreenState.EDIT) {
+            editorEditText.setSelection(0);
+            editorEditText.post(() -> editorEditText.scrollTo(0, 0));
         }
-
-        scroll.addView(list);
-        d.setContentView(scroll);
-        styleDialogWindow(d);
-        d.show();
+        updateSliderPositionFromScroll();
     }
 
-    private void showFontDropdownDialog(final TextView fontDropdownText, final Dialog parentSettingsDialog) {
-        final Dialog d = new Dialog(this);
-        d.requestWindowFeature(Window.FEATURE_NO_TITLE);
-
-        ScrollView scroll = new ScrollView(this);
-        LinearLayout list = new LinearLayout(this);
-        list.setOrientation(LinearLayout.VERTICAL);
-        list.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        list.setBackground(makeRoundedRect(COLOR_CARD_BG, dp(16), COLOR_BORDER, dp(1)));
-        list.setPadding(dp(10), dp(10), dp(10), dp(10));
-
-        for (int i = 0; i < FONT_NAMES.length; i++) {
-            final int idx = i;
-            boolean isSelected = (idx == currentFontIndex);
-
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setBackground(makeRoundedRect(
-                    isSelected ? currentTheme.accentLight : Color.TRANSPARENT,
-                    dp(10),
-                    isSelected ? currentTheme.primary : 0,
-                    isSelected ? dp(1) : 0
-            ));
-            row.setPadding(dp(12), dp(12), dp(12), dp(12));
-
-            TextView label = new TextView(this);
-            label.setText(FONT_NAMES[idx]);
-            label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-            label.setTypeface(getFontTypefaceForIndex(idx, isSelected ? Typeface.BOLD : Typeface.NORMAL));
-            label.setTextColor(isSelected ? currentTheme.primaryDark : COLOR_TEXT_DARK);
-            label.setIncludeFontPadding(false);
-            LinearLayout.LayoutParams lLp = new LinearLayout.LayoutParams(
-                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-            row.addView(label, lLp);
-
-            if (isSelected) {
-                TextView check = new TextView(this);
-                check.setText("✓");
-                check.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-                check.setTypeface(getAppTypeface(Typeface.BOLD));
-                check.setTextColor(currentTheme.primary);
-                check.setIncludeFontPadding(false);
-                row.addView(check);
-            }
-
-            row.setOnClickListener(v -> {
-                currentFontIndex = idx;
-                prefs.edit().putInt(KEY_FONT_INDEX, idx).apply();
-                fontDropdownText.setText(FONT_NAMES[idx]);
-                fontDropdownText.setTypeface(getFontTypefaceForIndex(idx, Typeface.BOLD));
-                d.dismiss();
-                if (parentSettingsDialog != null && parentSettingsDialog.isShowing()) {
-                    parentSettingsDialog.dismiss();
-                }
-                renderCurrentScreen();
-                showSettingsDialog();
+    private void jumpToDocumentBottom() {
+        if (currentScreen == ScreenState.READ) {
+            readScrollView.post(() -> {
+                int max = getReadMaxScroll();
+                readScrollView.smoothScrollTo(0, max);
             });
-
-            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            if (i < FONT_NAMES.length - 1) rowLp.bottomMargin = dp(4);
-            list.addView(row, rowLp);
+        } else if (currentScreen == ScreenState.EDIT) {
+            int len = editorEditText.getText() != null ? editorEditText.getText().length() : 0;
+            editorEditText.setSelection(len);
+            editorEditText.post(() -> {
+                int max = getEditorMaxScroll();
+                editorEditText.scrollTo(0, max);
+            });
         }
-
-        scroll.addView(list);
-        d.setContentView(scroll);
-        styleDialogWindow(d);
-        d.show();
+        updateSliderPositionFromScroll();
     }
 
-    private Set<String> getEnabledTools() {
-        Set<String> saved = prefs.getStringSet(KEY_ENABLED_TOOLS, null);
+    private void switchDocumentMode(ScreenState mode) {
+        currentScreen = mode;
+        String currentText = editorEditText.getText().toString();
+        if (jumpMenuCard != null) jumpMenuCard.setVisibility(View.GONE);
+
+        if (mode == ScreenState.READ) {
+            saveCurrentFileImmediately(false);
+            hideKeyboard();
+            ((View) editorToolbarContainer.getParent()).setVisibility(View.GONE);
+            editorEditText.setVisibility(View.GONE);
+            readScrollView.setVisibility(View.VISIBLE);
+            readActionBar.setVisibility(View.VISIBLE);
+
+            if (!currentSearchQuery.isEmpty()) {
+                readTextView.setText(highlightSearchMatches(currentText, currentSearchQuery));
+                scrollToFirstMatchInReadMode(currentText, currentSearchQuery);
+            } else {
+                readTextView.setText(currentText);
+            }
+        } else {
+            ((View) editorToolbarContainer.getParent()).setVisibility(View.VISIBLE);
+            readScrollView.setVisibility(View.GONE);
+            readActionBar.setVisibility(View.GONE);
+            editorEditText.setVisibility(View.VISIBLE);
+            editorEditText.requestFocus();
+        }
+        updateSliderPositionFromScroll();
+    }
+
+    private void scrollToFirstMatchInReadMode(String text, String query) {
+        int idx = text.toLowerCase(Locale.ROOT).indexOf(query.toLowerCase(Locale.ROOT));
+        if (idx < 0) return;
+        readTextView.post(() -> {
+            Layout layout = readTextView.getLayout();
+            if (layout != null) {
+                int line = layout.getLineForOffset(idx);
+                int y = layout.getLineTop(line);
+                readScrollView.smoothScrollTo(0, Math.max(0, y - dp(60)));
+            }
+        });
+    }
+
+    private void updateStatsBar(String text) {
+        if (statsBarView == null) return;
+        int chars = text.length();
+        String trimmed = text.trim();
+        int words = trimmed.isEmpty() ? 0 : trimmed.split("\\s+").length;
+        int lines = text.isEmpty() ? 1 : text.split("\n", -1).length;
+        statsBarView.setText("الكلمات: " + words + "   •   الحروف: " + chars + "   •   الأسطر: " + lines);
+    }
+
+    private void showResetZoomDialog() {
+        AlertDialog.Builder b = new AlertDialog.Builder(this);
+        b.setTitle("حجم النص (" + getZoomPercent() + "%)");
+        b.setMessage("هل تريد إعادة حجم النص إلى الحجم الافتراضي (100%)؟");
+        b.setPositiveButton("إعادة لـ 100%", (d, w) -> setZoomPercent(100));
+        b.setNegativeButton("إلغاء", null);
+        b.show();
+    }
+
+    // ==================== 3. EDITOR TOOLBAR & FIND/REPLACE ====================
+
+    private List<String> getOrderedToolList() {
+        String orderStr = prefs.getString("toolbar_order_v3", null);
+        List<String> result = new ArrayList<>();
+        if (orderStr != null && !orderStr.isEmpty()) {
+            String[] parts = orderStr.split(",");
+            for (String p : parts) {
+                if (isValidToolId(p) && !result.contains(p)) {
+                    result.add(p);
+                }
+            }
+        }
+        for (String id : TOOL_IDS) {
+            if (!result.contains(id)) result.add(id);
+        }
+        return result;
+    }
+
+    private Set<String> getEnabledToolsSet() {
+        Set<String> saved = prefs.getStringSet("enabled_tools_v3", null);
         if (saved == null) {
             return new HashSet<>(DEFAULT_ENABLED_TOOLS);
         }
         return new HashSet<>(saved);
-    }
-
-    private void saveEnabledTools(Set<String> enabled) {
-        prefs.edit().putStringSet(KEY_ENABLED_TOOLS, new HashSet<>(enabled)).apply();
-    }
-
-    private List<String> getToolbarOrder() {
-        String raw = prefs.getString(KEY_TOOLBAR_ORDER, null);
-        List<String> order = new ArrayList<>();
-        if (raw != null && !raw.trim().isEmpty()) {
-            String[] parts = raw.split(",");
-            for (String p : parts) {
-                String id = p.trim();
-                if (!id.isEmpty() && !order.contains(id) && isValidToolId(id)) {
-                    order.add(id);
-                }
-            }
-        }
-        for (String defId : TOOL_IDS) {
-            if (!order.contains(defId)) {
-                order.add(defId);
-            }
-        }
-        return order;
     }
 
     private boolean isValidToolId(String id) {
@@ -1204,15 +1464,6 @@ public class MainActivity extends Activity {
             if (t.equals(id)) return true;
         }
         return false;
-    }
-
-    private void saveToolbarOrder(List<String> order) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < order.size(); i++) {
-            if (i > 0) sb.append(",");
-            sb.append(order.get(i));
-        }
-        prefs.edit().putString(KEY_TOOLBAR_ORDER, sb.toString()).apply();
     }
 
     private String getToolLabel(String id) {
@@ -1226,1328 +1477,1714 @@ public class MainActivity extends Activity {
         for (int i = 0; i < TOOL_IDS.length; i++) {
             if (TOOL_IDS[i].equals(id)) return TOOL_ICON_RES[i];
         }
-        return "";
+        return "ic_auto_format";
     }
 
-    private int getDrawableIdByName(String resName) {
-        try {
-            return getResources().getIdentifier(resName, "drawable", getPackageName());
-        } catch (Throwable e) {
-            return 0;
+    private void populateEditorToolbar() {
+        if (editorToolbarContainer == null) return;
+        editorToolbarContainer.removeAllViews();
+
+        List<String> ordered = getOrderedToolList();
+        Set<String> enabled = getEnabledToolsSet();
+        boolean iconsOnly = prefs.getBoolean("toolbar_icons_only", false);
+
+        for (String toolId : ordered) {
+            if (!enabled.contains(toolId)) continue;
+
+            if (iconsOnly) {
+                FrameLayout iconBtn = new FrameLayout(this);
+                iconBtn.setBackground(roundedRect(getSecondaryBtnBgColor(), 10, 1, getBorderColor()));
+
+                ImageView img = new ImageView(this);
+                int drawableId = getDrawableId(getToolIconResName(toolId));
+                if (drawableId != 0) {
+                    img.setImageResource(drawableId);
+                    img.setImageTintList(ColorStateList.valueOf(getAccentTextColor()));
+                }
+                FrameLayout.LayoutParams imgLp = new FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER);
+                iconBtn.addView(img, imgLp);
+
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(42), dp(36));
+                lp.leftMargin = dp(6);
+                iconBtn.setOnClickListener(v -> executeEditorTool(toolId));
+                iconBtn.setOnLongClickListener(v -> {
+                    Toast.makeText(this, getToolLabel(toolId), Toast.LENGTH_SHORT).show();
+                    return true;
+                });
+                editorToolbarContainer.addView(iconBtn, lp);
+            } else {
+                Button toolBtn = new Button(this);
+                configureTextButton(toolBtn, getToolLabel(toolId), 13, true, getAccentTextColor(), 36);
+                toolBtn.setBackground(roundedRect(getSecondaryBtnBgColor(), 10, 1, getBorderColor()));
+                toolBtn.setPadding(dp(12), 0, dp(12), 0);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, dp(36));
+                lp.leftMargin = dp(6);
+                toolBtn.setOnClickListener(v -> executeEditorTool(toolId));
+                editorToolbarContainer.addView(toolBtn, lp);
+            }
         }
     }
 
-    private void showCustomizeToolbarDialog() {
-        final Dialog d = new Dialog(this);
-        d.requestWindowFeature(Window.FEATURE_NO_TITLE);
+    private void executeEditorTool(String toolId) {
+        if (editorEditText == null) return;
+        int start = Math.max(0, editorEditText.getSelectionStart());
+        int end = Math.max(0, editorEditText.getSelectionEnd());
+        if (start > end) {
+            int tmp = start;
+            start = end;
+            end = tmp;
+        }
+        Editable editable = editorEditText.getText();
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
 
-        LinearLayout outer = new LinearLayout(this);
-        outer.setOrientation(LinearLayout.VERTICAL);
-        outer.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        outer.setBackground(makeRoundedRect(COLOR_CARD_BG, dp(20), 0, 0));
-        outer.setPadding(dp(18), dp(18), dp(18), dp(16));
+        switch (toolId) {
+            case "undo":
+                if (undoIndex > 0) {
+                    isUndoRedoAction = true;
+                    undoIndex--;
+                    String prev = undoStack.get(undoIndex);
+                    editorEditText.setText(prev);
+                    editorEditText.setSelection(Math.min(prev.length(), start));
+                    isUndoRedoAction = false;
+                } else {
+                    Toast.makeText(this, "لا يوجد تراجع إضافي", Toast.LENGTH_SHORT).show();
+                }
+                break;
+
+            case "redo":
+                if (undoIndex < undoStack.size() - 1) {
+                    isUndoRedoAction = true;
+                    undoIndex++;
+                    String next = undoStack.get(undoIndex);
+                    editorEditText.setText(next);
+                    editorEditText.setSelection(Math.min(next.length(), start));
+                    isUndoRedoAction = false;
+                } else {
+                    Toast.makeText(this, "لا توجد إعادة إضافية", Toast.LENGTH_SHORT).show();
+                }
+                break;
+
+            case "copy":
+                if (start == end) {
+                    Toast.makeText(this, "حدد نصاً أولاً للنسخ", Toast.LENGTH_SHORT).show();
+                } else {
+                    String selected = editable.subSequence(start, end).toString();
+                    clipboard.setPrimaryClip(ClipData.newPlainText("mazwd_text", selected));
+                    Toast.makeText(this, "تم نسخ النص", Toast.LENGTH_SHORT).show();
+                }
+                break;
+
+            case "cut":
+                if (start == end) {
+                    Toast.makeText(this, "حدد نصاً أولاً للقص", Toast.LENGTH_SHORT).show();
+                } else {
+                    String selected = editable.subSequence(start, end).toString();
+                    clipboard.setPrimaryClip(ClipData.newPlainText("mazwd_text", selected));
+                    editable.delete(start, end);
+                    Toast.makeText(this, "تم قص النص", Toast.LENGTH_SHORT).show();
+                }
+                break;
+
+            case "paste":
+                if (clipboard.hasPrimaryClip() && clipboard.getPrimaryClip() != null
+                        && clipboard.getPrimaryClip().getItemCount() > 0) {
+                    CharSequence clipText = clipboard.getPrimaryClip().getItemAt(0).coerceToText(this);
+                    if (clipText != null) {
+                        editable.replace(start, end, clipText);
+                    }
+                } else {
+                    Toast.makeText(this, "الحافظة فارغة", Toast.LENGTH_SHORT).show();
+                }
+                break;
+
+            case "select_all":
+                editorEditText.selectAll();
+                break;
+
+            case "select_up":
+                editorEditText.setSelection(0, end);
+                break;
+
+            case "select_down":
+                editorEditText.setSelection(start, editable.length());
+                break;
+
+            case "auto_format": {
+                String formatted = autoFormatArabicText(editable.toString());
+                editorEditText.setText(formatted);
+                editorEditText.setSelection(formatted.length());
+                Toast.makeText(this, "تم التنسيق الآلي للنص", Toast.LENGTH_SHORT).show();
+                break;
+            }
+
+            case "signature": {
+                String sig = prefs.getString("custom_signature", "").trim();
+                if (sig.isEmpty()) {
+                    showQuickSetSignatureDialog();
+                    return;
+                }
+                String prefix = (editable.length() > 0 && !editable.toString().endsWith("\n")) ? "\n\n" : "";
+                String insert = prefix + sig + "\n";
+                editable.replace(start, end, insert);
+                break;
+            }
+
+            case "datetime": {
+                SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd - hh:mm a", new Locale("ar"));
+                String dt = sdf.format(new Date());
+                editable.replace(start, end, dt);
+                break;
+            }
+
+            case "find_replace": {
+                showFindReplaceDialog();
+                break;
+            }
+        }
+    }
+
+    private void showFindReplaceDialog() {
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        root.setBackground(roundedRect(getCardBgColor(), 18, 1, getBorderColor()));
+        root.setPadding(dp(20), dp(18), dp(20), dp(18));
+
+        TextView title = new TextView(this);
+        title.setText("بحث واستبدال في المستند");
+        title.setTextColor(getAccentTextColor());
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        title.setTypeface(getAppTypeface(true));
+        title.setGravity(Gravity.RIGHT);
+        root.addView(title);
+
+        TextView countLabel = new TextView(this);
+        countLabel.setText("اكتب الكلمة المراد البحث عنها");
+        countLabel.setTextColor(getTextSecondaryColor());
+        countLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        countLabel.setTypeface(getAppTypeface(false));
+        countLabel.setGravity(Gravity.RIGHT);
+        LinearLayout.LayoutParams clLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        clLp.topMargin = dp(4);
+        clLp.bottomMargin = dp(10);
+        root.addView(countLabel, clLp);
+
+        EditText findInput = new EditText(this);
+        findInput.setHint("النص المراد البحث عنه...");
+        findInput.setHintTextColor(getTextSecondaryColor());
+        findInput.setTextColor(getTextPrimaryColor());
+        findInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        findInput.setTypeface(getAppTypeface(false));
+        findInput.setBackground(roundedRect(getInputBgColor(), 10, 1, getBorderColor()));
+        findInput.setPadding(dp(12), dp(10), dp(12), dp(10));
+        findInput.setSingleLine(true);
+        root.addView(findInput);
+
+        EditText replaceInput = new EditText(this);
+        replaceInput.setHint("الاستبدال بـ...");
+        replaceInput.setHintTextColor(getTextSecondaryColor());
+        replaceInput.setTextColor(getTextPrimaryColor());
+        replaceInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        replaceInput.setTypeface(getAppTypeface(false));
+        replaceInput.setBackground(roundedRect(getInputBgColor(), 10, 1, getBorderColor()));
+        replaceInput.setPadding(dp(12), dp(10), dp(12), dp(10));
+        replaceInput.setSingleLine(true);
+        LinearLayout.LayoutParams repLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        repLp.topMargin = dp(10);
+        repLp.bottomMargin = dp(14);
+        root.addView(replaceInput, repLp);
+
+        findInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                String q = s.toString();
+                if (q.isEmpty()) {
+                    countLabel.setText("اكتب الكلمة المراد البحث عنها");
+                    return;
+                }
+                String full = editorEditText.getText().toString();
+                int matches = countOccurrences(full, q);
+                countLabel.setText("عدد التطابقات في المستند: " + matches);
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+
+        LinearLayout actionsRow = new LinearLayout(this);
+        actionsRow.setOrientation(LinearLayout.HORIZONTAL);
+        actionsRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        Button findNextBtn = new Button(this);
+        configureTextButton(findNextBtn, "بحث عن التالي", 13, true, getTextPrimaryColor(), 42);
+        findNextBtn.setBackground(roundedRect(getSecondaryBtnBgColor(), 10, 1, getBorderColor()));
+        findNextBtn.setOnClickListener(v -> {
+            String q = findInput.getText().toString();
+            if (q.isEmpty()) return;
+            String text = editorEditText.getText().toString();
+            int from = Math.max(0, editorEditText.getSelectionEnd());
+            int idx = text.indexOf(q, from);
+            if (idx < 0 && from > 0) {
+                idx = text.indexOf(q, 0);
+            }
+            if (idx >= 0) {
+                editorEditText.requestFocus();
+                editorEditText.setSelection(idx, idx + q.length());
+                Toast.makeText(this, "تم تحديد الكلمة في النص", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "لم يتم العثور على الكلمة", Toast.LENGTH_SHORT).show();
+            }
+        });
+        LinearLayout.LayoutParams fnLp = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        fnLp.leftMargin = dp(6);
+        actionsRow.addView(findNextBtn, fnLp);
+
+        Button replaceAllBtn = new Button(this);
+        configureTextButton(replaceAllBtn, "استبدال الكل", 13, true, Color.WHITE, 42);
+        replaceAllBtn.setBackground(roundedRect(getPrimaryColor(), 10, 0, 0));
+        replaceAllBtn.setOnClickListener(v -> {
+            String q = findInput.getText().toString();
+            String rep = replaceInput.getText().toString();
+            if (q.isEmpty()) {
+                Toast.makeText(this, "أدخل النص المراد البحث عنه أولاً", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            String current = editorEditText.getText().toString();
+            int matches = countOccurrences(current, q);
+            if (matches == 0) {
+                Toast.makeText(this, "لا توجد تطابقات لاستبدالها", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            String updated = current.replace(q, rep);
+            editorEditText.setText(updated);
+            editorEditText.setSelection(updated.length());
+            Toast.makeText(this, "تم استبدال " + matches + " موضع بنجاح", Toast.LENGTH_SHORT).show();
+            dialog.dismiss();
+        });
+        LinearLayout.LayoutParams raLp = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        raLp.rightMargin = dp(6);
+        actionsRow.addView(replaceAllBtn, raLp);
+
+        root.addView(actionsRow);
+
+        Button closeBtn = new Button(this);
+        configureTextButton(closeBtn, "إغلاق", 13, true, getTextSecondaryColor(), 38);
+        closeBtn.setBackgroundColor(Color.TRANSPARENT);
+        closeBtn.setOnClickListener(v -> dialog.dismiss());
+        LinearLayout.LayoutParams cbLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(38));
+        cbLp.topMargin = dp(8);
+        root.addView(closeBtn, cbLp);
+
+        dialog.setContentView(root);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setLayout(
+                    (int) (getResources().getDisplayMetrics().widthPixels * 0.90),
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+            );
+        }
+        dialog.show();
+    }
+
+    private int countOccurrences(String text, String target) {
+        if (text == null || target == null || target.isEmpty()) return 0;
+        int count = 0;
+        int idx = 0;
+        while ((idx = text.indexOf(target, idx)) >= 0) {
+            count++;
+            idx += target.length();
+        }
+        return count;
+    }
+
+    private void showQuickSetSignatureDialog() {
+        AlertDialog.Builder b = new AlertDialog.Builder(this);
+        b.setTitle("إعداد التوقيع الشخصي");
+
+        EditText input = new EditText(this);
+        input.setHint(SIGNATURE_HINT);
+        input.setGravity(Gravity.RIGHT | Gravity.TOP);
+        input.setTypeface(getAppTypeface(false));
+        input.setPadding(dp(16), dp(14), dp(16), dp(14));
+        b.setView(input);
+
+        b.setPositiveButton("حفظ وإدراج", (d, w) -> {
+            String newSig = input.getText().toString().trim();
+            prefs.edit().putString("custom_signature", newSig).apply();
+            if (!newSig.isEmpty()) {
+                executeEditorTool("signature");
+            }
+        });
+        b.setNegativeButton("إلغاء", null);
+        b.show();
+    }
+
+    private String autoFormatArabicText(String input) {
+        if (input == null || input.isEmpty()) return "";
+        String s = input.replace("\r\n", "\n").replace("\r", "\n");
+        String[] lines = s.split("\n", -1);
+        StringBuilder sb = new StringBuilder();
+        int emptyCount = 0;
+
+        for (String line : lines) {
+            String clean = line.trim().replaceAll("[ \\t]+", " ");
+            clean = clean.replaceAll("\\s+([،؛؟!.:])", "$1");
+            clean = clean.replaceAll("([،؛؟!])(?=[^\\s\\n])", "$1 ");
+
+            if (clean.isEmpty()) {
+                emptyCount++;
+                if (emptyCount <= 1 && sb.length() > 0) {
+                    sb.append("\n");
+                }
+            } else {
+                emptyCount = 0;
+                if (sb.length() > 0) sb.append("\n");
+                sb.append(clean);
+            }
+        }
+        return sb.toString().trim();
+    }
+
+    private void recordUndoState(String text) {
+        if (undoIndex >= 0 && undoIndex < undoStack.size() && undoStack.get(undoIndex).equals(text)) {
+            return;
+        }
+        while (undoStack.size() > undoIndex + 1) {
+            undoStack.remove(undoStack.size() - 1);
+        }
+        undoStack.add(text);
+        if (undoStack.size() > 60) {
+            undoStack.remove(0);
+        }
+        undoIndex = undoStack.size() - 1;
+    }
+
+    // ==================== 4. ORGANIZED SETTINGS DIALOG ====================
+
+    private void showSettingsDialog() {
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        root.setBackground(roundedRect(getBgColor(), 20, 1, getBorderColor()));
+        root.setPadding(dp(16), dp(16), dp(16), dp(14));
+
+        // Header
+        LinearLayout headerRow = new LinearLayout(this);
+        headerRow.setOrientation(LinearLayout.HORIZONTAL);
+        headerRow.setGravity(Gravity.CENTER_VERTICAL);
+        headerRow.setPadding(dp(4), 0, dp(4), dp(10));
+
+        TextView headerTitle = new TextView(this);
+        headerTitle.setText("⚙  إعدادات المفكرة");
+        headerTitle.setTextColor(getAccentTextColor());
+        headerTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 19);
+        headerTitle.setTypeface(getAppTypeface(true));
+        headerTitle.setIncludeFontPadding(false);
+        LinearLayout.LayoutParams htLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        headerRow.addView(headerTitle, htLp);
+
+        TextView closeX = new TextView(this);
+        closeX.setText("✕");
+        closeX.setTextColor(getTextSecondaryColor());
+        closeX.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        closeX.setPadding(dp(8), dp(2), dp(8), dp(2));
+        closeX.setOnClickListener(v -> dialog.dismiss());
+        headerRow.addView(closeX);
+        root.addView(headerRow);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+
+        // ========== CARD 1: المظهر والخطوط ==========
+        LinearLayout appearanceCard = createSettingsSectionCard("المظهر والخطوط");
+
+        // Dark Mode Toggle
+        CheckBox darkModeCheck = createSettingsCheckRow(
+                "تفعيل الوضع الليلي المريح للعين (Dark Mode)",
+                isDarkMode(),
+                isChecked -> {
+                    prefs.edit().putBoolean("dark_mode", isChecked).apply();
+                    dialog.dismiss();
+                    showHomeScreen(false);
+                    showSettingsDialog();
+                }
+        );
+        appearanceCard.addView(darkModeCheck);
+
+        // Theme Selector Dropdown
+        TextView themeLabel = createSettingsLabel("ثيم الألوان:");
+        appearanceCard.addView(themeLabel);
+
+        LinearLayout themeSelectBox = new LinearLayout(this);
+        themeSelectBox.setOrientation(LinearLayout.HORIZONTAL);
+        themeSelectBox.setGravity(Gravity.CENTER_VERTICAL);
+        themeSelectBox.setBackground(roundedRect(getInputBgColor(), 12, 1, getBorderColor()));
+        themeSelectBox.setPadding(dp(14), dp(11), dp(14), dp(11));
+
+        View currentThemeDot = new View(this);
+        currentThemeDot.setBackground(roundedRect(getPrimaryColor(), 8, 0, 0));
+        LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dp(16), dp(16));
+        dotLp.leftMargin = dp(10);
+        themeSelectBox.addView(currentThemeDot, dotLp);
+
+        TextView currentThemeText = new TextView(this);
+        currentThemeText.setText(THEMES[getThemeIndex()][0]);
+        currentThemeText.setTextColor(getTextPrimaryColor());
+        currentThemeText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        currentThemeText.setTypeface(getAppTypeface(true));
+        currentThemeText.setIncludeFontPadding(false);
+        currentThemeText.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams cttLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        themeSelectBox.addView(currentThemeText, cttLp);
+
+        TextView themeArrow = new TextView(this);
+        themeArrow.setText("▼");
+        themeArrow.setTextColor(getTextSecondaryColor());
+        themeArrow.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        themeSelectBox.addView(themeArrow);
+
+        themeSelectBox.setOnClickListener(v -> showThemeDropdownDialog(dialog));
+        appearanceCard.addView(themeSelectBox);
+
+        // Font Selector Dropdown
+        TextView fontLabel = createSettingsLabel("نوع الخط:");
+        appearanceCard.addView(fontLabel);
+
+        LinearLayout fontSelectBox = new LinearLayout(this);
+        fontSelectBox.setOrientation(LinearLayout.HORIZONTAL);
+        fontSelectBox.setGravity(Gravity.CENTER_VERTICAL);
+        fontSelectBox.setBackground(roundedRect(getInputBgColor(), 12, 1, getBorderColor()));
+        fontSelectBox.setPadding(dp(14), dp(11), dp(14), dp(11));
+
+        TextView currentFontText = new TextView(this);
+        currentFontText.setText(FONT_NAMES[getFontIndex()]);
+        currentFontText.setTextColor(getTextPrimaryColor());
+        currentFontText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        currentFontText.setTypeface(getAppTypeface(true));
+        currentFontText.setIncludeFontPadding(false);
+        currentFontText.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams cftLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        fontSelectBox.addView(currentFontText, cftLp);
+
+        TextView fontArrow = new TextView(this);
+        fontArrow.setText("▼");
+        fontArrow.setTextColor(getTextSecondaryColor());
+        fontArrow.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        fontSelectBox.addView(fontArrow);
+
+        fontSelectBox.setOnClickListener(v -> showFontDropdownDialog(dialog));
+        appearanceCard.addView(fontSelectBox);
+
+        content.addView(appearanceCard);
+
+        // ========== CARD 2: خيارات شاشة القراءة والتحرير ==========
+        LinearLayout editorOptionsCard = createSettingsSectionCard("خيارات شاشة القراءة والتحرير");
+
+        CheckBox fastSliderCheck = createSettingsCheckRow(
+                "إظهار شريط التمرير السريع الجانبي (يسار الشاشة)",
+                prefs.getBoolean("show_fast_slider", true),
+                isChecked -> prefs.edit().putBoolean("show_fast_slider", isChecked).apply()
+        );
+        editorOptionsCard.addView(fastSliderCheck);
+
+        CheckBox jumpBtnCheck = createSettingsCheckRow(
+                "إظهار زر الانتقال السريع (لأول وآخر المستند)",
+                prefs.getBoolean("show_jump_btn", true),
+                isChecked -> prefs.edit().putBoolean("show_jump_btn", isChecked).apply()
+        );
+        editorOptionsCard.addView(jumpBtnCheck);
+
+        CheckBox statsBarCheck = createSettingsCheckRow(
+                "إظهار شريط إحصائيات النص (الكلمات والحروف والأسطر)",
+                prefs.getBoolean("show_stats_bar", true),
+                isChecked -> prefs.edit().putBoolean("show_stats_bar", isChecked).apply()
+        );
+        editorOptionsCard.addView(statsBarCheck);
+
+        CheckBox iconsOnlyCheck = createSettingsCheckRow(
+                "عرض شريط الأدوات كرموز فقط (بدلاً من النص)",
+                prefs.getBoolean("toolbar_icons_only", false),
+                isChecked -> prefs.edit().putBoolean("toolbar_icons_only", isChecked).apply()
+        );
+        editorOptionsCard.addView(iconsOnlyCheck);
+
+        Button customizeToolbarBtn = new Button(this);
+        configureTextButton(customizeToolbarBtn, "🛠  تخصيص وترتيب أدوات التحرير", 14, true, getAccentTextColor(), 44);
+        customizeToolbarBtn.setBackground(roundedRect(getLightAccentColor(), 12, 0, 0));
+        customizeToolbarBtn.setOnClickListener(v -> showToolbarCustomizationDialog());
+        LinearLayout.LayoutParams ctbLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(44));
+        ctbLp.topMargin = dp(8);
+        editorOptionsCard.addView(customizeToolbarBtn, ctbLp);
+
+        content.addView(editorOptionsCard);
+
+        // ========== CARD 3: التوقيع وإدارة الملفات ==========
+        LinearLayout filesCard = createSettingsSectionCard("التوقيع وإدارة الملفات");
+
+        TextView sigLabel = createSettingsLabel("التوقيع الشخصي:");
+        filesCard.addView(sigLabel);
+
+        EditText sigInput = new EditText(this);
+        sigInput.setText(prefs.getString("custom_signature", ""));
+        sigInput.setHint(SIGNATURE_HINT);
+        sigInput.setHintTextColor(getTextSecondaryColor());
+        sigInput.setTextColor(getTextPrimaryColor());
+        sigInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        sigInput.setTypeface(getAppTypeface(false));
+        sigInput.setGravity(Gravity.RIGHT | Gravity.TOP);
+        sigInput.setMinLines(2);
+        sigInput.setBackground(roundedRect(getInputBgColor(), 10, 1, getBorderColor()));
+        sigInput.setPadding(dp(12), dp(10), dp(12), dp(10));
+        filesCard.addView(sigInput);
+
+        Button saveSigBtn = new Button(this);
+        configureTextButton(saveSigBtn, "حفظ التوقيع", 14, true, Color.WHITE, 42);
+        saveSigBtn.setBackground(roundedRect(getPrimaryColor(), 10, 0, 0));
+        LinearLayout.LayoutParams ssLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(42));
+        ssLp.topMargin = dp(8);
+        saveSigBtn.setOnClickListener(v -> {
+            String newSig = sigInput.getText().toString().trim();
+            prefs.edit().putString("custom_signature", newSig).apply();
+            Toast.makeText(this, newSig.isEmpty() ? "تم تفريغ التوقيع" : "تم حفظ التوقيع بنجاح", Toast.LENGTH_SHORT).show();
+        });
+        filesCard.addView(saveSigBtn, ssLp);
+
+        Button changeFolderBtn = new Button(this);
+        configureTextButton(changeFolderBtn, "📁  تغيير مجلد حفظ الملفات", 14, true, getTextPrimaryColor(), 44);
+        changeFolderBtn.setBackground(roundedRect(getSecondaryBtnBgColor(), 12, 1, getBorderColor()));
+        LinearLayout.LayoutParams cfLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(44));
+        cfLp.topMargin = dp(10);
+        changeFolderBtn.setOnClickListener(v -> {
+            dialog.dismiss();
+            pickFolder();
+        });
+        filesCard.addView(changeFolderBtn, cfLp);
+
+        content.addView(filesCard);
+
+        scroll.addView(content);
+        LinearLayout.LayoutParams scLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+        root.addView(scroll, scLp);
+
+        Button closeBtn = new Button(this);
+        configureTextButton(closeBtn, "إغلاق", 15, true, Color.WHITE, 46);
+        closeBtn.setBackground(roundedRect(getPrimaryColor(), 12, 0, 0));
+        LinearLayout.LayoutParams clLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
+        clLp.topMargin = dp(10);
+        closeBtn.setOnClickListener(v -> {
+            String newSig = sigInput.getText().toString().trim();
+            prefs.edit().putString("custom_signature", newSig).apply();
+            dialog.dismiss();
+            showHomeScreen(false);
+        });
+        root.addView(closeBtn, clLp);
+
+        dialog.setContentView(root);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setLayout(
+                    (int) (getResources().getDisplayMetrics().widthPixels * 0.93),
+                    (int) (getResources().getDisplayMetrics().heightPixels * 0.86)
+            );
+        }
+        dialog.show();
+    }
+
+    private LinearLayout createSettingsSectionCard(String sectionTitle) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(roundedRect(getCardBgColor(), 14, 1, getBorderColor()));
+        card.setPadding(dp(14), dp(12), dp(14), dp(14));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = dp(12);
+        card.setLayoutParams(lp);
+
+        TextView title = new TextView(this);
+        title.setText(sectionTitle);
+        title.setTextColor(getAccentTextColor());
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        title.setTypeface(getAppTypeface(true));
+        title.setIncludeFontPadding(false);
+        title.setGravity(Gravity.RIGHT);
+        LinearLayout.LayoutParams tLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        tLp.bottomMargin = dp(6);
+        card.addView(title, tLp);
+
+        View div = new View(this);
+        div.setBackgroundColor(getBorderColor());
+        LinearLayout.LayoutParams dLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(1));
+        dLp.bottomMargin = dp(6);
+        card.addView(div, dLp);
+
+        return card;
+    }
+
+    private interface OnCheckChange {
+        void onChanged(boolean isChecked);
+    }
+
+    private CheckBox createSettingsCheckRow(String label, boolean checked, OnCheckChange listener) {
+        CheckBox cb = new CheckBox(this);
+        cb.setText("  " + label);
+        cb.setTextColor(getTextPrimaryColor());
+        cb.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
+        cb.setTypeface(getAppTypeface(false));
+        cb.setChecked(checked);
+        cb.setPadding(dp(4), dp(6), dp(4), dp(6));
+        cb.setOnCheckedChangeListener((buttonView, isChecked) -> listener.onChanged(isChecked));
+        return cb;
+    }
+
+    private TextView createSettingsLabel(String text) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextColor(getTextSecondaryColor());
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        tv.setTypeface(getAppTypeface(true));
+        tv.setIncludeFontPadding(false);
+        tv.setGravity(Gravity.RIGHT);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(10);
+        lp.bottomMargin = dp(6);
+        tv.setLayoutParams(lp);
+        return tv;
+    }
+
+    private void showThemeDropdownDialog(Dialog parentSettingsDialog) {
+        Dialog themeDialog = new Dialog(this);
+        themeDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        box.setBackground(roundedRect(getCardBgColor(), 16, 1, getBorderColor()));
+        box.setPadding(dp(12), dp(12), dp(12), dp(12));
+
+        TextView title = new TextView(this);
+        title.setText("اختر ثيم الألوان");
+        title.setTextColor(getAccentTextColor());
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        title.setTypeface(getAppTypeface(true));
+        title.setIncludeFontPadding(false);
+        title.setGravity(Gravity.RIGHT);
+        title.setPadding(dp(8), dp(4), dp(8), dp(10));
+        box.addView(title);
+
+        ScrollView sv = new ScrollView(this);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+
+        int selected = getThemeIndex();
+        for (int i = 0; i < THEMES.length; i++) {
+            final int idx = i;
+            boolean isSelected = (idx == selected);
+
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setBackground(roundedRect(
+                    isSelected ? getLightAccentColor() : Color.TRANSPARENT,
+                    10,
+                    isSelected ? 1 : 0,
+                    getPrimaryColor()
+            ));
+            row.setPadding(dp(12), dp(11), dp(12), dp(11));
+
+            View colorDot = new View(this);
+            colorDot.setBackground(roundedRect(Color.parseColor(THEMES[idx][1]), 8, 0, 0));
+            LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dp(18), dp(18));
+            dotLp.leftMargin = dp(12);
+            row.addView(colorDot, dotLp);
+
+            TextView item = new TextView(this);
+            item.setText((isSelected ? "✓  " : "") + THEMES[idx][0]);
+            item.setTextColor(isSelected ? getAccentTextColor() : getTextPrimaryColor());
+            item.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            item.setTypeface(getAppTypeface(isSelected));
+            item.setIncludeFontPadding(false);
+            item.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+            row.addView(item, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            row.setOnClickListener(v -> {
+                prefs.edit().putInt("theme_index", idx).apply();
+                updateStatusBarColor();
+                themeDialog.dismiss();
+                if (parentSettingsDialog != null && parentSettingsDialog.isShowing()) {
+                    parentSettingsDialog.dismiss();
+                }
+                showHomeScreen(false);
+                showSettingsDialog();
+            });
+
+            list.addView(row);
+        }
+
+        sv.addView(list);
+        box.addView(sv);
+
+        themeDialog.setContentView(box);
+        if (themeDialog.getWindow() != null) {
+            themeDialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            themeDialog.getWindow().setLayout(
+                    (int) (getResources().getDisplayMetrics().widthPixels * 0.88),
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+            );
+        }
+        themeDialog.show();
+    }
+
+    private void showFontDropdownDialog(Dialog parentSettingsDialog) {
+        Dialog fontDialog = new Dialog(this);
+        fontDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        box.setBackground(roundedRect(getCardBgColor(), 16, 1, getBorderColor()));
+        box.setPadding(dp(12), dp(12), dp(12), dp(12));
+
+        TextView title = new TextView(this);
+        title.setText("اختر نوع الخط");
+        title.setTextColor(getAccentTextColor());
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        title.setTypeface(getAppTypeface(true));
+        title.setIncludeFontPadding(false);
+        title.setGravity(Gravity.RIGHT);
+        title.setPadding(dp(8), dp(4), dp(8), dp(10));
+        box.addView(title);
+
+        ScrollView sv = new ScrollView(this);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+
+        int selected = getFontIndex();
+        for (int i = 0; i < FONT_NAMES.length; i++) {
+            final int idx = i;
+            boolean isSelected = (idx == selected);
+
+            TextView item = new TextView(this);
+            item.setText((isSelected ? "✓  " : "") + FONT_NAMES[idx]);
+            item.setTextColor(isSelected ? getAccentTextColor() : getTextPrimaryColor());
+            item.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            item.setTypeface(getTypefaceForIndex(idx, isSelected));
+            item.setIncludeFontPadding(false);
+            item.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+            item.setBackground(roundedRect(
+                    isSelected ? getLightAccentColor() : Color.TRANSPARENT,
+                    10,
+                    isSelected ? 1 : 0,
+                    getPrimaryColor()
+            ));
+            item.setPadding(dp(14), dp(12), dp(14), dp(12));
+
+            LinearLayout.LayoutParams itemLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            itemLp.bottomMargin = dp(4);
+
+            item.setOnClickListener(v -> {
+                prefs.edit().putInt("font_index", idx).apply();
+                fontDialog.dismiss();
+                if (parentSettingsDialog != null && parentSettingsDialog.isShowing()) {
+                    parentSettingsDialog.dismiss();
+                }
+                showHomeScreen(false);
+                showSettingsDialog();
+            });
+
+            list.addView(item, itemLp);
+        }
+
+        sv.addView(list);
+        box.addView(sv);
+
+        fontDialog.setContentView(box);
+        if (fontDialog.getWindow() != null) {
+            fontDialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            fontDialog.getWindow().setLayout(
+                    (int) (getResources().getDisplayMetrics().widthPixels * 0.88),
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+            );
+        }
+        fontDialog.show();
+    }
+
+    // ==================== 5. TOOLBAR CUSTOMIZATION WITH SMOOTH DRAG & DROP ====================
+
+    private void showToolbarCustomizationDialog() {
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        root.setBackground(roundedRect(getCardBgColor(), 20, 1, getBorderColor()));
+        root.setPadding(dp(18), dp(18), dp(18), dp(16));
 
         TextView title = new TextView(this);
         title.setText("تخصيص وترتيب أدوات التحرير");
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
-        title.setTypeface(getAppTypeface(Typeface.BOLD));
-        title.setTextColor(currentTheme.primaryDark);
+        title.setTextColor(getAccentTextColor());
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        title.setTypeface(getAppTypeface(true));
         title.setIncludeFontPadding(false);
-        title.setGravity(Gravity.CENTER);
-        outer.addView(title);
+        title.setGravity(Gravity.RIGHT);
+        root.addView(title);
 
-        TextView subtitle = new TextView(this);
-        subtitle.setText("اسحب من علامة (≡) للأعلى أو الأسفل لتغيير الترتيب، أو فعّل الأدوات التي تريدها:");
-        subtitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        subtitle.setTypeface(getAppTypeface(Typeface.NORMAL));
-        subtitle.setTextColor(COLOR_TEXT_MUTED);
-        subtitle.setIncludeFontPadding(false);
-        subtitle.setGravity(Gravity.CENTER);
+        TextView sub = new TextView(this);
+        sub.setText("اسحب الأداة من مقبض السحب (≡) للأعلى أو للأسفل لتغيير ترتيبها، أو ضع علامة (✓) لإظهارها:");
+        sub.setTextColor(getTextSecondaryColor());
+        sub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
+        sub.setTypeface(getAppTypeface(false));
+        sub.setGravity(Gravity.RIGHT);
         LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         subLp.topMargin = dp(4);
         subLp.bottomMargin = dp(12);
-        outer.addView(subtitle, subLp);
+        root.addView(sub, subLp);
 
-        final ScrollView scroll = new ScrollView(this);
-        final LinearLayout listContainer = new LinearLayout(this);
+        final List<String> currentOrder = new ArrayList<>(getOrderedToolList());
+        final Set<String> currentEnabled = new HashSet<>(getEnabledToolsSet());
+
+        ScrollView listScroll = new ScrollView(this);
+        LinearLayout listContainer = new LinearLayout(this);
         listContainer.setOrientation(LinearLayout.VERTICAL);
         listContainer.setClipChildren(false);
         listContainer.setClipToPadding(false);
-        scroll.addView(listContainer);
-
-        final List<String> currentOrder = getToolbarOrder();
-        final Set<String> enabledSet = getEnabledTools();
+        listScroll.addView(listContainer);
 
         final Runnable[] rebuildListRef = new Runnable[1];
-        rebuildListRef[0] = new Runnable() {
-            @Override
-            public void run() {
-                listContainer.removeAllViews();
+        rebuildListRef[0] = () -> {
+            listContainer.removeAllViews();
+            int rowHeightEstimate = dp(54);
 
-                for (int i = 0; i < currentOrder.size(); i++) {
-                    final int index = i;
-                    final String toolId = currentOrder.get(i);
-                    final String label = getToolLabel(toolId);
-                    final String iconResName = getToolIconResName(toolId);
+            for (int i = 0; i < currentOrder.size(); i++) {
+                final int index = i;
+                final String toolId = currentOrder.get(index);
 
-                    final LinearLayout row = new LinearLayout(MainActivity.this);
-                    row.setOrientation(LinearLayout.HORIZONTAL);
-                    row.setGravity(Gravity.CENTER_VERTICAL);
-                    row.setBackground(makeRoundedRect(0xFFF8FAFC, dp(12), COLOR_BORDER, dp(1)));
-                    row.setPadding(dp(10), dp(8), dp(10), dp(8));
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setBackground(roundedRect(getInputBgColor(), 12, 1, getBorderColor()));
+                row.setPadding(dp(10), dp(6), dp(10), dp(6));
 
-                    // Drag Handle (Vector Icon)
-                    FrameLayout dragHandle = new FrameLayout(MainActivity.this);
-                    dragHandle.setBackground(makeRoundedRect(currentTheme.accentLight, dp(8), 0, 0));
-                    ImageView dragImg = new ImageView(MainActivity.this);
-                    int dragId = getDrawableIdByName("ic_drag_handle");
-                    if (dragId != 0) {
-                        dragImg.setImageResource(dragId);
-                        dragImg.setColorFilter(currentTheme.primaryDark);
-                    }
-                    dragHandle.addView(dragImg, new FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER));
-                    LinearLayout.LayoutParams dhLp = new LinearLayout.LayoutParams(dp(38), dp(36));
-                    dhLp.leftMargin = dp(10);
-                    row.addView(dragHandle, dhLp);
+                LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
+                rowLp.bottomMargin = dp(8);
 
-                    // Tool Vector Icon Badge
-                    FrameLayout iconBadge = new FrameLayout(MainActivity.this);
-                    iconBadge.setBackground(makeRoundedRect(Color.WHITE, dp(8), COLOR_BORDER, dp(1)));
-                    ImageView toolImg = new ImageView(MainActivity.this);
-                    int iconId = getDrawableIdByName(iconResName);
-                    if (iconId != 0) {
-                        toolImg.setImageResource(iconId);
-                        toolImg.setColorFilter(currentTheme.primary);
-                    }
-                    iconBadge.addView(toolImg, new FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER));
-                    LinearLayout.LayoutParams ibLp = new LinearLayout.LayoutParams(dp(34), dp(34));
-                    ibLp.leftMargin = dp(10);
-                    row.addView(iconBadge, ibLp);
-
-                    // Tool Label
-                    TextView nameTv = new TextView(MainActivity.this);
-                    nameTv.setText(label);
-                    nameTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-                    nameTv.setTypeface(getAppTypeface(Typeface.BOLD));
-                    nameTv.setTextColor(COLOR_TEXT_DARK);
-                    nameTv.setIncludeFontPadding(false);
-                    LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(
-                            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-                    row.addView(nameTv, nameLp);
-
-                    // CheckBox
-                    final CheckBox cb = new CheckBox(MainActivity.this);
-                    cb.setChecked(enabledSet.contains(toolId));
-                    cb.setOnCheckedChangeListener((buttonView, isChecked) -> {
-                        if (isChecked) {
-                            enabledSet.add(toolId);
-                        } else {
-                            enabledSet.remove(toolId);
-                        }
-                        saveEnabledTools(enabledSet);
-                    });
-                    row.addView(cb);
-
-                    nameTv.setOnClickListener(v -> cb.setChecked(!cb.isChecked()));
-
-                    // Safe Touch Drag & Drop on Drag Handle
-                    final float[] downRawY = new float[1];
-                    final boolean[] isDragging = new boolean[]{false};
-                    dragHandle.setOnTouchListener((v, event) -> {
-                        int action = event.getActionMasked();
-                        if (action == MotionEvent.ACTION_DOWN) {
-                            isDragging[0] = true;
-                            downRawY[0] = event.getRawY();
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                                row.setTranslationZ(dp(12));
-                            }
-                            row.setAlpha(0.92f);
-                            row.setBackground(makeRoundedRect(0xFFE0F2FE, dp(12), currentTheme.primary, dp(2)));
-                            scroll.requestDisallowInterceptTouchEvent(true);
-                            return true;
-                        } else if (action == MotionEvent.ACTION_MOVE) {
-                            if (!isDragging[0]) return false;
-                            float dy = event.getRawY() - downRawY[0];
-                            row.setTranslationY(dy);
-                            int rowH = row.getHeight() + dp(8);
-                            if (rowH > dp(20)) {
-                                int offsetSteps = Math.round(dy / rowH);
-                                int targetIndex = Math.max(0, Math.min(currentOrder.size() - 1, index + offsetSteps));
-                                if (targetIndex != index) {
-                                    isDragging[0] = false;
-                                    String moved = currentOrder.remove(index);
-                                    currentOrder.add(targetIndex, moved);
-                                    saveToolbarOrder(currentOrder);
-                                    row.setTranslationY(0f);
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                                        row.setTranslationZ(0f);
-                                    }
-                                    listContainer.post(rebuildListRef[0]);
-                                    return true;
-                                }
-                            }
-                            return true;
-                        } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                            if (isDragging[0]) {
-                                isDragging[0] = false;
-                                row.setTranslationY(0f);
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                                    row.setTranslationZ(0f);
-                                }
-                                row.setAlpha(1.0f);
-                                listContainer.post(rebuildListRef[0]);
-                            }
-                            scroll.requestDisallowInterceptTouchEvent(false);
-                            return true;
-                        }
-                        return false;
-                    });
-
-                    LinearLayout.LayoutParams rLp = new LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                    rLp.bottomMargin = dp(8);
-                    listContainer.addView(row, rLp);
+                // Drag Handle
+                FrameLayout dragHandle = new FrameLayout(this);
+                ImageView dragIcon = new ImageView(this);
+                int dragResId = getDrawableId("ic_drag_handle");
+                if (dragResId != 0) {
+                    dragIcon.setImageResource(dragResId);
+                    dragIcon.setImageTintList(ColorStateList.valueOf(getTextSecondaryColor()));
                 }
+                dragHandle.addView(dragIcon, new FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER));
+                row.addView(dragHandle, new LinearLayout.LayoutParams(dp(36), dp(36)));
+
+                // Vector Tool Icon Badge
+                FrameLayout iconBadge = new FrameLayout(this);
+                iconBadge.setBackground(roundedRect(getLightAccentColor(), 8, 0, 0));
+                ImageView toolIcon = new ImageView(this);
+                int iconId = getDrawableId(getToolIconResName(toolId));
+                if (iconId != 0) {
+                    toolIcon.setImageResource(iconId);
+                    toolIcon.setImageTintList(ColorStateList.valueOf(getAccentTextColor()));
+                }
+                iconBadge.addView(toolIcon, new FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER));
+                LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(dp(32), dp(32));
+                badgeLp.rightMargin = dp(6);
+                badgeLp.leftMargin = dp(10);
+                row.addView(iconBadge, badgeLp);
+
+                // Tool Label
+                TextView nameView = new TextView(this);
+                nameView.setText(getToolLabel(toolId));
+                nameView.setTextColor(getTextPrimaryColor());
+                nameView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+                nameView.setTypeface(getAppTypeface(true));
+                nameView.setIncludeFontPadding(false);
+                nameView.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+                LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+                row.addView(nameView, nameLp);
+
+                // CheckBox
+                CheckBox cb = new CheckBox(this);
+                cb.setChecked(currentEnabled.contains(toolId));
+                cb.setOnCheckedChangeListener((btn, isChecked) -> {
+                    if (isChecked) currentEnabled.add(toolId);
+                    else currentEnabled.remove(toolId);
+                });
+                row.addView(cb);
+
+                final float[] startRawY = new float[1];
+                final int[] currentDragIdx = new int[]{index};
+                final boolean[] isDragging = new boolean[]{false};
+
+                dragHandle.setOnTouchListener((v, event) -> {
+                    int action = event.getActionMasked();
+                    if (action == MotionEvent.ACTION_DOWN) {
+                        startRawY[0] = event.getRawY();
+                        currentDragIdx[0] = index;
+                        isDragging[0] = true;
+                        listScroll.requestDisallowInterceptTouchEvent(true);
+                        row.setTranslationZ(dp(12));
+                        row.setAlpha(0.92f);
+                        row.setBackground(roundedRect(getLightAccentColor(), 12, 2, getPrimaryColor()));
+                        return true;
+                    } else if (action == MotionEvent.ACTION_MOVE && isDragging[0]) {
+                        float dy = event.getRawY() - startRawY[0];
+                        row.setTranslationY(dy);
+                        int shift = Math.round(dy / rowHeightEstimate);
+                        int targetIdx = Math.max(0, Math.min(currentOrder.size() - 1, currentDragIdx[0] + shift));
+                        if (targetIdx != currentDragIdx[0]) {
+                            String moved = currentOrder.remove(currentDragIdx[0]);
+                            currentOrder.add(targetIdx, moved);
+                            currentDragIdx[0] = targetIdx;
+                            startRawY[0] = event.getRawY();
+                            row.setTranslationY(0f);
+                            listContainer.post(rebuildListRef[0]);
+                            return false;
+                        }
+                        return true;
+                    } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                        if (isDragging[0]) {
+                            isDragging[0] = false;
+                            row.setTranslationY(0f);
+                            row.setTranslationZ(0f);
+                            row.setAlpha(1.0f);
+                            listScroll.requestDisallowInterceptTouchEvent(false);
+                            listContainer.post(rebuildListRef[0]);
+                        }
+                        return true;
+                    }
+                    return false;
+                });
+
+                listContainer.addView(row, rowLp);
             }
         };
-
         rebuildListRef[0].run();
 
         LinearLayout.LayoutParams scLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(360));
-        outer.addView(scroll, scLp);
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+        root.addView(listScroll, scLp);
 
-        Button doneBtn = createPrimaryButton("تم");
-        doneBtn.setOnClickListener(v -> {
-            d.dismiss();
-            if (currentScreen == ScreenState.EDIT) {
-                renderCurrentScreen();
-            }
-        });
-        LinearLayout.LayoutParams dLp = new LinearLayout.LayoutParams(
+        Button saveBtn = new Button(this);
+        configureTextButton(saveBtn, "حفظ ترتيب وإعدادات الأدوات", 15, true, Color.WHITE, 46);
+        saveBtn.setBackground(roundedRect(getPrimaryColor(), 12, 0, 0));
+        LinearLayout.LayoutParams sbLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
-        dLp.topMargin = dp(12);
-        outer.addView(doneBtn, dLp);
+        sbLp.topMargin = dp(10);
+        saveBtn.setOnClickListener(v -> {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < currentOrder.size(); i++) {
+                if (i > 0) sb.append(",");
+                sb.append(currentOrder.get(i));
+            }
+            prefs.edit()
+                    .putString("toolbar_order_v3", sb.toString())
+                    .putStringSet("enabled_tools_v3", currentEnabled)
+                    .apply();
+            if (editorToolbarContainer != null) {
+                populateEditorToolbar();
+            }
+            Toast.makeText(this, "تم حفظ تخصيص الأدوات", Toast.LENGTH_SHORT).show();
+            dialog.dismiss();
+        });
+        root.addView(saveBtn, sbLp);
 
-        d.setContentView(outer);
-        styleDialogWindow(d);
-        d.show();
+        dialog.setContentView(root);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setLayout(
+                    (int) (getResources().getDisplayMetrics().widthPixels * 0.92),
+                    (int) (getResources().getDisplayMetrics().heightPixels * 0.82)
+            );
+        }
+        dialog.show();
     }
 
-    // =========================================================================
-    // DOCUMENT SCREEN (READ & EDIT MODES)
-    // =========================================================================
+    // ==================== 6. CUSTOM 3-DOTS MENU & SAFE VAULT (النسخ الآمنة) ====================
 
-    private View buildDocumentScreen() {
-        final boolean isEdit = (currentScreen == ScreenState.EDIT);
+    private void showFileOptionsMenu(NoteFile file) {
+        Dialog menuDialog = new Dialog(this);
+        menuDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
 
-        LinearLayout mainLayout = new LinearLayout(this);
-        mainLayout.setOrientation(LinearLayout.VERTICAL);
-        mainLayout.setBackgroundColor(COLOR_BG_MAIN);
-        mainLayout.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        root.setBackground(roundedRect(getCardBgColor(), 18, 1, getBorderColor()));
+        root.setPadding(dp(16), dp(16), dp(16), dp(12));
 
-        // 1. Clean Top Header Bar
-        LinearLayout topBar = new LinearLayout(this);
-        topBar.setOrientation(LinearLayout.HORIZONTAL);
-        topBar.setGravity(Gravity.CENTER_VERTICAL);
-        topBar.setBackgroundColor(currentTheme.primary);
-        topBar.setPadding(dp(10), dp(10), dp(10), dp(10));
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            topBar.setElevation(dp(6));
-        }
+        // File Title Header
+        TextView header = new TextView(this);
+        header.setText(stripTxtExtension(file.name));
+        header.setTextColor(getAccentTextColor());
+        header.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        header.setTypeface(getAppTypeface(true));
+        header.setIncludeFontPadding(false);
+        header.setGravity(Gravity.RIGHT);
+        header.setPadding(dp(6), dp(2), dp(6), dp(10));
+        root.addView(header);
 
-        TextView backBtn = new TextView(this);
-        backBtn.setText("→ رجوع");
-        backBtn.setTextColor(Color.WHITE);
-        backBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        backBtn.setTypeface(getAppTypeface(Typeface.BOLD));
-        backBtn.setIncludeFontPadding(false);
-        backBtn.setGravity(Gravity.CENTER);
-        backBtn.setBackground(makeRoundedRect(currentTheme.primaryDark, dp(10), 0, 0));
-        backBtn.setPadding(dp(12), dp(8), dp(12), dp(8));
-        backBtn.setOnClickListener(v -> handleBackNavigation());
-        topBar.addView(backBtn);
+        View topDivider = new View(this);
+        topDivider.setBackgroundColor(getPrimaryColor());
+        LinearLayout.LayoutParams tdLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(2));
+        tdLp.bottomMargin = dp(4);
+        root.addView(topDivider, tdLp);
 
-        docTitleView = new TextView(this);
-        docTitleView.setText(activeFile != null ? activeFile.displayTitle : "ملف نصي");
-        docTitleView.setTextColor(Color.WHITE);
-        docTitleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        docTitleView.setTypeface(getAppTypeface(Typeface.BOLD));
-        docTitleView.setIncludeFontPadding(false);
-        docTitleView.setSingleLine(true);
-        docTitleView.setEllipsize(TextUtils.TruncateAt.END);
-        docTitleView.setGravity(Gravity.CENTER);
-        docTitleView.setPadding(dp(8), dp(4), dp(8), dp(4));
-        docTitleView.setOnClickListener(v -> {
-            if (activeFile != null) {
-                showRenameDialog(activeFile, true);
+        // Exact requested order:
+        // 1. تثبيت الملف
+        // 2. إعادة تسمية الملف
+        // 3. إنشاء نسخة مكررة من الملف
+        // 4. إنشاء نسخة آمنة
+        // 5. تصفح النسخ الآمنة
+        // 6. مشاركة الملف
+        // 7. حذف الملف
+        String[] labels = new String[]{
+                file.pinned ? "إلغاء تثبيت الملف" : "تثبيت الملف",
+                "إعادة تسمية الملف",
+                "إنشاء نسخة مكررة من الملف",
+                "إنشاء نسخة آمنة",
+                "تصفح النسخ الآمنة",
+                "مشاركة الملف",
+                "حذف الملف"
+        };
+
+        for (int i = 0; i < labels.length; i++) {
+            final int idx = i;
+            boolean isDelete = (i == labels.length - 1);
+
+            TextView optionView = new TextView(this);
+            optionView.setText(labels[i]);
+            int textColor = isDelete
+                    ? (isDarkMode() ? Color.parseColor("#F87171") : Color.parseColor("#DC2626"))
+                    : getTextPrimaryColor();
+            optionView.setTextColor(textColor);
+            optionView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            optionView.setTypeface(getAppTypeface(isDelete));
+            optionView.setIncludeFontPadding(false);
+            optionView.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+            optionView.setPadding(dp(10), dp(13), dp(10), dp(13));
+
+            optionView.setOnClickListener(v -> {
+                menuDialog.dismiss();
+                switch (idx) {
+                    case 0:
+                        togglePinFile(file);
+                        break;
+                    case 1:
+                        showRenameDialog(file);
+                        break;
+                    case 2:
+                        duplicateFile(file);
+                        break;
+                    case 3:
+                        createSafeSnapshot(file, false);
+                        break;
+                    case 4:
+                        showBrowseSafeSnapshotsDialog(file);
+                        break;
+                    case 5: {
+                        String body = readFileContent(file.uri);
+                        shareTextContent(file.name, body);
+                        break;
+                    }
+                    case 6:
+                        confirmDeleteFile(file);
+                        break;
+                }
+            });
+
+            root.addView(optionView);
+
+            if (i < labels.length - 1) {
+                View div = new View(this);
+                div.setBackgroundColor(getBorderColor());
+                root.addView(div, new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
             }
-        });
-        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        topBar.addView(docTitleView, titleLp);
-
-        LinearLayout zoomCapsule = new LinearLayout(this);
-        zoomCapsule.setOrientation(LinearLayout.HORIZONTAL);
-        zoomCapsule.setGravity(Gravity.CENTER_VERTICAL);
-        zoomCapsule.setBackground(makeRoundedRect(currentTheme.primaryDark, dp(10), 0x44FFFFFF, dp(1)));
-        zoomCapsule.setPadding(dp(4), dp(2), dp(4), dp(2));
-
-        TextView zoomInBtn = new TextView(this);
-        zoomInBtn.setText("＋");
-        zoomInBtn.setTextColor(Color.WHITE);
-        zoomInBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        zoomInBtn.setTypeface(getAppTypeface(Typeface.BOLD));
-        zoomInBtn.setIncludeFontPadding(false);
-        zoomInBtn.setPadding(dp(8), dp(4), dp(8), dp(4));
-        zoomInBtn.setOnClickListener(v -> changeZoom(5));
-        zoomCapsule.addView(zoomInBtn);
-
-        zoomLabelView = new TextView(this);
-        zoomLabelView.setText(currentZoomPercent + "%");
-        zoomLabelView.setTextColor(0xFFE2E8F0);
-        zoomLabelView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        zoomLabelView.setTypeface(getAppTypeface(Typeface.BOLD));
-        zoomLabelView.setIncludeFontPadding(false);
-        zoomLabelView.setPadding(dp(4), dp(4), dp(4), dp(4));
-        zoomLabelView.setOnClickListener(v -> showZoomResetDialog());
-        zoomCapsule.addView(zoomLabelView);
-
-        TextView zoomOutBtn = new TextView(this);
-        zoomOutBtn.setText("－");
-        zoomOutBtn.setTextColor(Color.WHITE);
-        zoomOutBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        zoomOutBtn.setTypeface(getAppTypeface(Typeface.BOLD));
-        zoomOutBtn.setIncludeFontPadding(false);
-        zoomOutBtn.setPadding(dp(8), dp(4), dp(8), dp(4));
-        zoomOutBtn.setOnClickListener(v -> changeZoom(-5));
-        zoomCapsule.addView(zoomOutBtn);
-
-        topBar.addView(zoomCapsule);
-        mainLayout.addView(topBar);
-
-        // 2. Editor Toolbar
-        toolbarWrapper = new LinearLayout(this);
-        toolbarWrapper.setOrientation(LinearLayout.VERTICAL);
-        toolbarWrapper.setVisibility(isEdit ? View.VISIBLE : View.GONE);
-        if (isEdit) {
-            toolbarWrapper.addView(buildEditorToolbar());
-        }
-        mainLayout.addView(toolbarWrapper);
-
-        // 3. Main Content Paper Card
-        LinearLayout paperCard = new LinearLayout(this);
-        paperCard.setOrientation(LinearLayout.VERTICAL);
-        paperCard.setBackground(makeRoundedRect(COLOR_CARD_BG, dp(16), COLOR_BORDER, dp(1)));
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            paperCard.setElevation(dp(2));
         }
 
-        if (isEdit) {
-            ScrollView editScroll = new ScrollView(this);
-            editScroll.setFillViewport(true);
+        menuDialog.setContentView(root);
+        if (menuDialog.getWindow() != null) {
+            menuDialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            menuDialog.getWindow().setLayout(
+                    (int) (getResources().getDisplayMetrics().widthPixels * 0.86),
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+            );
+        }
+        menuDialog.show();
+    }
 
-            documentEditor = new EditText(this);
-            documentEditor.setBackgroundColor(Color.TRANSPARENT);
-            documentEditor.setTextColor(COLOR_TEXT_DARK);
-            documentEditor.setTypeface(getAppTypeface(Typeface.NORMAL));
-            documentEditor.setGravity(Gravity.TOP | Gravity.RIGHT);
-            documentEditor.setPadding(dp(16), dp(16), dp(16), dp(24));
-            documentEditor.setLineSpacing(dp(4), 1.15f);
-            applyZoomToTextViews();
+    // --- SAFE VAULT LOGIC (النسخ الآمنة في مسار المجلد داخل الهاتف) ---
 
-            isInternalTextChange = true;
-            documentEditor.setText(activeFileContent);
-            isInternalTextChange = false;
+    private Uri getOrCreateSafeVaultDirectoryUri(boolean createIfMissing) {
+        if (folderUri == null) return null;
+        try {
+            String treeDocId = DocumentsContract.getTreeDocumentId(folderUri);
+            Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(folderUri, treeDocId);
+            String[] projection = new String[]{
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document.COLUMN_MIME_TYPE
+            };
 
-            resetUndoHistory(activeFileContent);
-
-            documentEditor.addTextChangedListener(new TextWatcher() {
-                @Override
-                public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-
-                @Override
-                public void onTextChanged(CharSequence s, int start, int before, int count) {
-                    String current = s.toString();
-                    activeFileContent = current;
-                    updateStatsCounter(current);
-                    if (!isInternalTextChange) {
-                        pushUndoState(current);
+            try (Cursor c = getContentResolver().query(childrenUri, projection, null, null, null)) {
+                if (c != null) {
+                    while (c.moveToNext()) {
+                        String docId = c.getString(0);
+                        String name = c.getString(1);
+                        String mime = c.getString(2);
+                        if (SAFE_VAULT_FOLDER_NAME.equals(name)
+                                && DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)) {
+                            return DocumentsContract.buildDocumentUriUsingTree(folderUri, docId);
+                        }
                     }
                 }
-
-                @Override
-                public void afterTextChanged(Editable s) {}
-            });
-
-            editScroll.addView(documentEditor, new ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            paperCard.addView(editScroll, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        } else {
-            ScrollView readScroll = new ScrollView(this);
-            readScroll.setFillViewport(true);
-
-            readViewText = new TextView(this);
-            readViewText.setTextColor(COLOR_TEXT_DARK);
-            readViewText.setTypeface(getAppTypeface(Typeface.NORMAL));
-            readViewText.setGravity(Gravity.TOP | Gravity.RIGHT);
-            readViewText.setPadding(dp(18), dp(18), dp(18), dp(28));
-            readViewText.setLineSpacing(dp(5), 1.2f);
-            readViewText.setTextIsSelectable(true);
-            applyZoomToTextViews();
-
-            if (!currentSearchQuery.isEmpty()) {
-                readViewText.setText(applySearchHighlight(activeFileContent, currentSearchQuery));
-            } else {
-                readViewText.setText(activeFileContent);
             }
 
-            readScroll.addView(readViewText, new ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            paperCard.addView(readScroll, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            if (createIfMissing) {
+                Uri parentDocUri = DocumentsContract.buildDocumentUriUsingTree(folderUri, treeDocId);
+                return DocumentsContract.createDocument(
+                        getContentResolver(),
+                        parentDocUri,
+                        DocumentsContract.Document.MIME_TYPE_DIR,
+                        SAFE_VAULT_FOLDER_NAME
+                );
+            }
+        } catch (Exception ignored) {
         }
+        return null;
+    }
 
-        LinearLayout.LayoutParams paperLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
-        paperLp.setMargins(dp(12), dp(10), dp(12), dp(8));
-        mainLayout.addView(paperCard, paperLp);
+    private String getSafeSnapshotPrefix(String originalFileName) {
+        return stripTxtExtension(originalFileName) + "__نسخة_آمنة_";
+    }
 
-        // 4. Bottom Live Counter Bar
-        LinearLayout counterBar = new LinearLayout(this);
-        counterBar.setOrientation(LinearLayout.HORIZONTAL);
-        counterBar.setGravity(Gravity.CENTER);
-        counterBar.setBackgroundColor(0xFFE2E8F0);
-        counterBar.setPadding(dp(12), dp(6), dp(12), dp(6));
-
-        statsBarText = new TextView(this);
-        statsBarText.setTextColor(COLOR_TEXT_DARK);
-        statsBarText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        statsBarText.setTypeface(getAppTypeface(Typeface.BOLD));
-        statsBarText.setIncludeFontPadding(false);
-        counterBar.addView(statsBarText);
-
-        mainLayout.addView(counterBar, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        updateStatsCounter(activeFileContent);
-
-        // 5. Read-Mode Bottom Action Bar
-        if (!isEdit) {
-            LinearLayout readBottomBar = new LinearLayout(this);
-            readBottomBar.setOrientation(LinearLayout.HORIZONTAL);
-            readBottomBar.setGravity(Gravity.CENTER_VERTICAL);
-            readBottomBar.setBackgroundColor(COLOR_CARD_BG);
-            readBottomBar.setPadding(dp(14), dp(10), dp(14), dp(10));
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                readBottomBar.setElevation(dp(8));
-            }
-
-            Button editModeBtn = createPrimaryButton("تحرير الملف");
-            editModeBtn.setOnClickListener(v -> {
-                currentScreen = ScreenState.EDIT;
-                renderCurrentScreen();
-                if (documentEditor != null) {
-                    documentEditor.requestFocus();
-                    showKeyboard(documentEditor);
+    private void createSafeSnapshot(NoteFile file, boolean silentBeforeDelete) {
+        if (folderUri == null || file == null) return;
+        try {
+            Uri vaultDirUri = getOrCreateSafeVaultDirectoryUri(true);
+            if (vaultDirUri == null) {
+                if (!silentBeforeDelete) {
+                    Toast.makeText(this, "تعذر الوصول إلى خزنة النسخ الآمنة", Toast.LENGTH_SHORT).show();
                 }
-            });
-            LinearLayout.LayoutParams ebLp = new LinearLayout.LayoutParams(0, dp(46), 1f);
-            ebLp.leftMargin = dp(6);
-            readBottomBar.addView(editModeBtn, ebLp);
-
-            Button shareBtn = createSecondaryButton("مشاركة الملف");
-            shareBtn.setOnClickListener(v -> shareCurrentDocument());
-            LinearLayout.LayoutParams sbLp = new LinearLayout.LayoutParams(0, dp(46), 1f);
-            sbLp.rightMargin = dp(6);
-            readBottomBar.addView(shareBtn, sbLp);
-
-            mainLayout.addView(readBottomBar, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        }
-
-        return mainLayout;
-    }
-
-    private void showZoomResetDialog() {
-        final Dialog d = new Dialog(this);
-        d.requestWindowFeature(Window.FEATURE_NO_TITLE);
-
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        box.setBackground(makeRoundedRect(COLOR_CARD_BG, dp(18), 0, 0));
-        box.setPadding(dp(20), dp(20), dp(20), dp(16));
-
-        TextView title = new TextView(this);
-        title.setText("حجم الخط والتكبير (" + currentZoomPercent + "%)");
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        title.setTypeface(getAppTypeface(Typeface.BOLD));
-        title.setTextColor(currentTheme.primaryDark);
-        title.setIncludeFontPadding(false);
-        title.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams tLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        tLp.bottomMargin = dp(14);
-        box.addView(title, tLp);
-
-        Button resetBtn = createPrimaryButton("إعادة الحجم الافتراضي (100%)");
-        resetBtn.setOnClickListener(v -> {
-            currentZoomPercent = 100;
-            prefs.edit().putInt(KEY_ZOOM_PERCENT, 100).apply();
-            if (zoomLabelView != null) zoomLabelView.setText("100%");
-            applyZoomToTextViews();
-            d.dismiss();
-        });
-        box.addView(resetBtn, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(46)));
-
-        d.setContentView(box);
-        styleDialogWindow(d);
-        d.show();
-    }
-
-    private View buildEditorToolbar() {
-        HorizontalScrollView hsv = new HorizontalScrollView(this);
-        hsv.setHorizontalScrollBarEnabled(false);
-        hsv.setBackgroundColor(COLOR_CARD_BG);
-        hsv.setPadding(dp(8), dp(6), dp(8), dp(6));
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            hsv.setElevation(dp(3));
-        }
-
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-
-        Set<String> enabled = getEnabledTools();
-        List<String> orderedIds = getToolbarOrder();
-        boolean iconsOnly = prefs.getBoolean(KEY_TOOLBAR_ICONS_ONLY, false);
-
-        for (final String id : orderedIds) {
-            if (!enabled.contains(id)) continue;
-            View chip = createToolbarActionView(id, iconsOnly, () -> performToolbarAction(id));
-            row.addView(chip);
-        }
-
-        hsv.addView(row);
-        return hsv;
-    }
-
-    private View createToolbarActionView(String toolId, boolean iconsOnly, Runnable action) {
-        String label = getToolLabel(toolId);
-        String iconResName = getToolIconResName(toolId);
-
-        if (iconsOnly) {
-            FrameLayout iconBox = new FrameLayout(this);
-            iconBox.setBackground(makeRoundedRect(currentTheme.accentLight, dp(10), COLOR_BORDER, dp(1)));
-            iconBox.setContentDescription(label);
-
-            ImageView iv = new ImageView(this);
-            int resId = getDrawableIdByName(iconResName);
-            if (resId != 0) {
-                iv.setImageResource(resId);
-                iv.setColorFilter(currentTheme.primaryDark);
-            }
-            FrameLayout.LayoutParams ivLp = new FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER);
-            iconBox.addView(iv, ivLp);
-
-            iconBox.setOnClickListener(v -> action.run());
-            iconBox.setOnLongClickListener(v -> {
-                Toast.makeText(this, label, Toast.LENGTH_SHORT).show();
-                return true;
-            });
-
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(42), dp(38));
-            lp.setMargins(dp(3), 0, dp(3), 0);
-            iconBox.setLayoutParams(lp);
-            return iconBox;
-        } else {
-            TextView chip = new TextView(this);
-            chip.setText(label);
-            chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-            chip.setTypeface(getAppTypeface(Typeface.BOLD));
-            chip.setTextColor(currentTheme.primaryDark);
-            chip.setIncludeFontPadding(false);
-            chip.setGravity(Gravity.CENTER);
-            chip.setBackground(makeRoundedRect(currentTheme.accentLight, dp(10), COLOR_BORDER, dp(1)));
-            chip.setPadding(dp(12), dp(7), dp(12), dp(7));
-            chip.setOnClickListener(v -> action.run());
-
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            lp.setMargins(dp(3), 0, dp(3), 0);
-            chip.setLayoutParams(lp);
-            return chip;
-        }
-    }
-
-    private void performToolbarAction(String toolId) {
-        if (documentEditor == null) return;
-
-        switch (toolId) {
-            case "undo":
-                performUndo();
-                break;
-            case "redo":
-                performRedo();
-                break;
-            case "copy":
-                copySelectedOrAll();
-                break;
-            case "cut":
-                cutSelectedText();
-                break;
-            case "paste":
-                pasteFromClipboard();
-                break;
-            case "select_all":
-                documentEditor.requestFocus();
-                documentEditor.selectAll();
-                break;
-            case "select_up":
-                selectToStart();
-                break;
-            case "select_down":
-                selectToEnd();
-                break;
-            case "auto_format":
-                autoFormatText();
-                break;
-            case "datetime":
-                insertDateTime();
-                break;
-            case "signature":
-                insertSignature();
-                break;
-        }
-    }
-
-    private void resetUndoHistory(String initialText) {
-        undoStack.clear();
-        undoStack.add(initialText != null ? initialText : "");
-        undoPointer = 0;
-    }
-
-    private void pushUndoState(String text) {
-        if (undoPointer >= 0 && undoPointer < undoStack.size()) {
-            if (undoStack.get(undoPointer).equals(text)) return;
-        }
-        while (undoStack.size() > undoPointer + 1) {
-            undoStack.remove(undoStack.size() - 1);
-        }
-        undoStack.add(text);
-        if (undoStack.size() > 80) {
-            undoStack.remove(0);
-        }
-        undoPointer = undoStack.size() - 1;
-    }
-
-    private void performUndo() {
-        if (undoPointer > 0) {
-            undoPointer--;
-            String prev = undoStack.get(undoPointer);
-            isInternalTextChange = true;
-            documentEditor.setText(prev);
-            documentEditor.setSelection(prev.length());
-            isInternalTextChange = false;
-            activeFileContent = prev;
-            updateStatsCounter(prev);
-        } else {
-            Toast.makeText(this, "لا يوجد تراجع إضافي", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    private void performRedo() {
-        if (undoPointer < undoStack.size() - 1) {
-            undoPointer++;
-            String next = undoStack.get(undoPointer);
-            isInternalTextChange = true;
-            documentEditor.setText(next);
-            documentEditor.setSelection(next.length());
-            isInternalTextChange = false;
-            activeFileContent = next;
-            updateStatsCounter(next);
-        } else {
-            Toast.makeText(this, "لا توجد خطوة للإعادة", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    private void copySelectedOrAll() {
-        int start = Math.max(0, documentEditor.getSelectionStart());
-        int end = Math.max(0, documentEditor.getSelectionEnd());
-        String text = documentEditor.getText().toString();
-        String toCopy;
-        if (start != end) {
-            toCopy = text.substring(Math.min(start, end), Math.max(start, end));
-        } else {
-            toCopy = text;
-        }
-        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-        if (cm != null) {
-            cm.setPrimaryClip(ClipData.newPlainText("mazwd_text", toCopy));
-            Toast.makeText(this, "تم النسخ إلى الحافظة", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    private void cutSelectedText() {
-        int start = Math.max(0, documentEditor.getSelectionStart());
-        int end = Math.max(0, documentEditor.getSelectionEnd());
-        if (start == end) {
-            Toast.makeText(this, "حدّد نصاً أولاً لقصه", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        int min = Math.min(start, end);
-        int max = Math.max(start, end);
-        String selected = documentEditor.getText().subSequence(min, max).toString();
-        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-        if (cm != null) {
-            cm.setPrimaryClip(ClipData.newPlainText("mazwd_cut", selected));
-        }
-        documentEditor.getText().delete(min, max);
-        Toast.makeText(this, "تم قص النص المحدد", Toast.LENGTH_SHORT).show();
-    }
-
-    private void pasteFromClipboard() {
-        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-        if (cm != null && cm.hasPrimaryClip() && cm.getPrimaryClip() != null
-                && cm.getPrimaryClip().getItemCount() > 0) {
-            CharSequence clip = cm.getPrimaryClip().getItemAt(0).coerceToText(this);
-            if (clip != null) {
-                int start = Math.max(0, documentEditor.getSelectionStart());
-                int end = Math.max(0, documentEditor.getSelectionEnd());
-                documentEditor.getText().replace(Math.min(start, end), Math.max(start, end), clip);
-            }
-        } else {
-            Toast.makeText(this, "الحافظة فارغة", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    private void selectToStart() {
-        documentEditor.requestFocus();
-        int cursor = Math.max(0, documentEditor.getSelectionEnd());
-        documentEditor.setSelection(0, cursor);
-    }
-
-    private void selectToEnd() {
-        documentEditor.requestFocus();
-        int cursor = Math.max(0, documentEditor.getSelectionStart());
-        int len = documentEditor.getText().length();
-        documentEditor.setSelection(cursor, len);
-    }
-
-    private void autoFormatText() {
-        String raw = documentEditor.getText().toString();
-        if (raw.trim().isEmpty()) return;
-
-        String formatted = raw
-                .replaceAll("[ \\t]+", " ")
-                .replaceAll(" *\\n *", "\n")
-                .replaceAll("\\n{3,}", "\n\n")
-                .replaceAll(" +([،؛؟.!:])", "$1")
-                .trim();
-
-        documentEditor.setText(formatted);
-        documentEditor.setSelection(formatted.length());
-        Toast.makeText(this, "تم تنسيق النص وترتيب الفقرات", Toast.LENGTH_SHORT).show();
-    }
-
-    private void insertDateTime() {
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd - hh:mm a", new Locale("ar"));
-        String dt = sdf.format(new Date());
-        int start = Math.max(0, documentEditor.getSelectionStart());
-        documentEditor.getText().insert(start, dt);
-    }
-
-    private void insertSignature() {
-        String sig = prefs.getString(KEY_SIGNATURE, "").trim();
-        if (sig.isEmpty()) {
-            showEmptySignatureDialog();
-            return;
-        }
-        String block = "\n\n— " + sig + "\n";
-        int pos = Math.max(0, documentEditor.getSelectionStart());
-        documentEditor.getText().insert(pos, block);
-    }
-
-    private void showEmptySignatureDialog() {
-        final Dialog d = new Dialog(this);
-        d.requestWindowFeature(Window.FEATURE_NO_TITLE);
-
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        box.setBackground(makeRoundedRect(COLOR_CARD_BG, dp(18), 0, 0));
-        box.setPadding(dp(20), dp(20), dp(20), dp(16));
-
-        TextView title = new TextView(this);
-        title.setText("إضافة توقيعك المخصص");
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
-        title.setTypeface(getAppTypeface(Typeface.BOLD));
-        title.setTextColor(currentTheme.primaryDark);
-        title.setIncludeFontPadding(false);
-        title.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams tLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        tLp.bottomMargin = dp(12);
-        box.addView(title, tLp);
-
-        final EditText input = new EditText(this);
-        input.setHint(SIGNATURE_HINT);
-        input.setHintTextColor(COLOR_TEXT_MUTED);
-        input.setTextColor(COLOR_TEXT_DARK);
-        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        input.setTypeface(getAppTypeface(Typeface.NORMAL));
-        input.setBackground(makeRoundedRect(0xFFF8FAFC, dp(12), COLOR_BORDER, dp(1)));
-        input.setPadding(dp(12), dp(10), dp(12), dp(10));
-        LinearLayout.LayoutParams inLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        inLp.bottomMargin = dp(14);
-        box.addView(input, inLp);
-
-        Button saveInsertBtn = createPrimaryButton("حفظ وإدراج التوقيع");
-        saveInsertBtn.setOnClickListener(v -> {
-            String newSig = input.getText().toString().trim();
-            if (newSig.isEmpty()) {
-                Toast.makeText(this, "يرجى كتابة التوقيع أولاً", Toast.LENGTH_SHORT).show();
                 return;
             }
-            prefs.edit().putString(KEY_SIGNATURE, newSig).apply();
-            d.dismiss();
-            if (documentEditor != null) {
-                String block = "\n\n— " + newSig + "\n";
-                int pos = Math.max(0, documentEditor.getSelectionStart());
-                documentEditor.getText().insert(pos, block);
+
+            String content = readFileContent(file.uri);
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US);
+            String snapName = getSafeSnapshotPrefix(file.name) + sdf.format(new Date()) + ".txt";
+
+            Uri snapUri = DocumentsContract.createDocument(
+                    getContentResolver(), vaultDirUri, "text/plain", snapName);
+            if (snapUri != null) {
+                writeFileContent(snapUri, content);
+                if (!silentBeforeDelete) {
+                    Toast.makeText(this, "تم إنشاء نسخة آمنة في الخزنة بنجاح", Toast.LENGTH_SHORT).show();
+                }
             }
+        } catch (Exception e) {
+            if (!silentBeforeDelete) {
+                Toast.makeText(this, "تعذر إنشاء النسخة الآمنة", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    private List<SafeSnapshot> loadSafeSnapshotsForFile(NoteFile file) {
+        List<SafeSnapshot> list = new ArrayList<>();
+        Uri vaultDirUri = getOrCreateSafeVaultDirectoryUri(false);
+        if (vaultDirUri == null) return list;
+
+        String prefix = getSafeSnapshotPrefix(file.name);
+        SimpleDateFormat displayFormat = new SimpleDateFormat("yyyy/MM/dd • hh:mm:ss a", new Locale("ar"));
+
+        try {
+            String vaultDocId = DocumentsContract.getDocumentId(vaultDirUri);
+            Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(folderUri, vaultDocId);
+            String[] projection = new String[]{
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+                    DocumentsContract.Document.COLUMN_SIZE
+            };
+
+            try (Cursor c = getContentResolver().query(childrenUri, projection, null, null, null)) {
+                if (c != null) {
+                    while (c.moveToNext()) {
+                        String docId = c.getString(0);
+                        String name = c.getString(1);
+                        long modified = c.isNull(2) ? 0L : c.getLong(2);
+                        long size = c.isNull(3) ? 0L : c.getLong(3);
+
+                        if (name != null && name.startsWith(prefix) && name.toLowerCase(Locale.ROOT).endsWith(".txt")) {
+                            SafeSnapshot snap = new SafeSnapshot();
+                            snap.uri = DocumentsContract.buildDocumentUriUsingTree(folderUri, docId);
+                            snap.fileName = name;
+                            snap.lastModified = modified;
+                            snap.size = size;
+                            snap.displayDate = modified > 0 ? displayFormat.format(new Date(modified)) : stripTxtExtension(name);
+                            list.add(snap);
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        Collections.sort(list, (a, b) -> Long.compare(b.lastModified, a.lastModified));
+        return list;
+    }
+
+    private void showBrowseSafeSnapshotsDialog(NoteFile file) {
+        List<SafeSnapshot> snapshots = loadSafeSnapshotsForFile(file);
+
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        root.setBackground(roundedRect(getCardBgColor(), 18, 1, getBorderColor()));
+        root.setPadding(dp(18), dp(18), dp(18), dp(14));
+
+        TextView title = new TextView(this);
+        title.setText("النسخ الآمنة لملف: " + stripTxtExtension(file.name));
+        title.setTextColor(getAccentTextColor());
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16.5f);
+        title.setTypeface(getAppTypeface(true));
+        title.setGravity(Gravity.RIGHT);
+        root.addView(title);
+
+        TextView subtitle = new TextView(this);
+        subtitle.setText("اضغط على أي نسخة لمعاينتها أو استعادتها إلى الملف الأصلي:");
+        subtitle.setTextColor(getTextSecondaryColor());
+        subtitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
+        subtitle.setTypeface(getAppTypeface(false));
+        subtitle.setGravity(Gravity.RIGHT);
+        LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        subLp.topMargin = dp(4);
+        subLp.bottomMargin = dp(12);
+        root.addView(subtitle, subLp);
+
+        if (snapshots.isEmpty()) {
+            TextView empty = new TextView(this);
+            empty.setText("لا توجد نسخ آمنة محفوظة لهذا الملف حتى الآن.\nيمكنك حفظ نسخة آمنة في أي وقت من قائمة الثلاث نقاط (⋮).");
+            empty.setTextColor(getTextSecondaryColor());
+            empty.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+            empty.setTypeface(getAppTypeface(false));
+            empty.setGravity(Gravity.CENTER);
+            empty.setPadding(dp(16), dp(28), dp(16), dp(28));
+            root.addView(empty);
+        } else {
+            ScrollView sv = new ScrollView(this);
+            LinearLayout list = new LinearLayout(this);
+            list.setOrientation(LinearLayout.VERTICAL);
+
+            for (int i = 0; i < snapshots.size(); i++) {
+                final SafeSnapshot snap = snapshots.get(i);
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.VERTICAL);
+                row.setBackground(roundedRect(getInputBgColor(), 12, 1, getBorderColor()));
+                row.setPadding(dp(14), dp(10), dp(14), dp(10));
+                LinearLayout.LayoutParams rLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                rLp.bottomMargin = dp(8);
+
+                TextView snapTitle = new TextView(this);
+                snapTitle.setText("نسخة آمنة #" + (snapshots.size() - i));
+                snapTitle.setTextColor(getTextPrimaryColor());
+                snapTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);
+                snapTitle.setTypeface(getAppTypeface(true));
+                snapTitle.setGravity(Gravity.RIGHT);
+                row.addView(snapTitle);
+
+                TextView snapMeta = new TextView(this);
+                snapMeta.setText(snap.displayDate + "   •   " + formatSize(snap.size));
+                snapMeta.setTextColor(getTextSecondaryColor());
+                snapMeta.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+                snapMeta.setTypeface(getAppTypeface(false));
+                snapMeta.setGravity(Gravity.RIGHT);
+                row.addView(snapMeta);
+
+                row.setOnClickListener(v -> {
+                    dialog.dismiss();
+                    showSafeSnapshotPreviewDialog(file, snap);
+                });
+
+                list.addView(row, rLp);
+            }
+            sv.addView(list);
+            LinearLayout.LayoutParams svLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+            root.addView(sv, svLp);
+        }
+
+        Button closeBtn = new Button(this);
+        configureTextButton(closeBtn, "إغلاق", 14, true, Color.WHITE, 42);
+        closeBtn.setBackground(roundedRect(getPrimaryColor(), 10, 0, 0));
+        LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(42));
+        cLp.topMargin = dp(10);
+        closeBtn.setOnClickListener(v -> dialog.dismiss());
+        root.addView(closeBtn, cLp);
+
+        dialog.setContentView(root);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setLayout(
+                    (int) (getResources().getDisplayMetrics().widthPixels * 0.90),
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+            );
+        }
+        dialog.show();
+    }
+
+    private void showSafeSnapshotPreviewDialog(NoteFile targetFile, SafeSnapshot snap) {
+        String snapContent = readFileContent(snap.uri);
+
+        Dialog previewDialog = new Dialog(this);
+        previewDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        root.setBackground(roundedRect(getCardBgColor(), 18, 1, getBorderColor()));
+        root.setPadding(dp(18), dp(18), dp(18), dp(14));
+
+        TextView title = new TextView(this);
+        title.setText("معاينة النسخة الآمنة");
+        title.setTextColor(getAccentTextColor());
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16.5f);
+        title.setTypeface(getAppTypeface(true));
+        title.setGravity(Gravity.RIGHT);
+        root.addView(title);
+
+        TextView meta = new TextView(this);
+        meta.setText(snap.displayDate);
+        meta.setTextColor(getTextSecondaryColor());
+        meta.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        meta.setGravity(Gravity.RIGHT);
+        LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        mLp.bottomMargin = dp(10);
+        root.addView(meta, mLp);
+
+        ScrollView sv = new ScrollView(this);
+        sv.setBackground(roundedRect(getInputBgColor(), 12, 1, getBorderColor()));
+        TextView contentTv = new TextView(this);
+        contentTv.setText(snapContent);
+        contentTv.setTextColor(getTextPrimaryColor());
+        contentTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);
+        contentTv.setTypeface(getAppTypeface(false));
+        contentTv.setLineSpacing(dp(4), 1.15f);
+        contentTv.setPadding(dp(14), dp(12), dp(14), dp(12));
+        contentTv.setTextIsSelectable(true);
+        sv.addView(contentTv);
+
+        LinearLayout.LayoutParams svLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+        root.addView(sv, svLp);
+
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams brLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        brLp.topMargin = dp(12);
+
+        Button restoreBtn = new Button(this);
+        configureTextButton(restoreBtn, "استعادة هذه النسخة", 14, true, Color.WHITE, 44);
+        restoreBtn.setBackground(roundedRect(getPrimaryColor(), 10, 0, 0));
+        restoreBtn.setOnClickListener(v -> {
+            writeFileContent(targetFile.uri, snapContent);
+            contentCache.put(targetFile.uri.toString(), snapContent);
+            Toast.makeText(this, "تم استعادة النسخة الآمنة إلى الملف بنجاح", Toast.LENGTH_SHORT).show();
+            previewDialog.dismiss();
+            loadFilesFromFolder();
         });
-        box.addView(saveInsertBtn, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(46)));
+        LinearLayout.LayoutParams b1Lp = new LinearLayout.LayoutParams(0, dp(44), 1.3f);
+        b1Lp.leftMargin = dp(6);
+        btnRow.addView(restoreBtn, b1Lp);
 
-        d.setContentView(box);
-        styleDialogWindow(d);
-        d.show();
+        Button cancelBtn = new Button(this);
+        configureTextButton(cancelBtn, "إغلاق", 14, true, getTextPrimaryColor(), 44);
+        cancelBtn.setBackground(roundedRect(getSecondaryBtnBgColor(), 10, 1, getBorderColor()));
+        cancelBtn.setOnClickListener(v -> previewDialog.dismiss());
+        LinearLayout.LayoutParams b2Lp = new LinearLayout.LayoutParams(0, dp(44), 1f);
+        b2Lp.rightMargin = dp(6);
+        btnRow.addView(cancelBtn, b2Lp);
+
+        root.addView(btnRow, brLp);
+
+        previewDialog.setContentView(root);
+        if (previewDialog.getWindow() != null) {
+            previewDialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            previewDialog.getWindow().setLayout(
+                    (int) (getResources().getDisplayMetrics().widthPixels * 0.92),
+                    (int) (getResources().getDisplayMetrics().heightPixels * 0.78)
+            );
+        }
+        previewDialog.show();
     }
 
-    private void changeZoom(int delta) {
-        currentZoomPercent = Math.max(60, Math.min(220, currentZoomPercent + delta));
-        prefs.edit().putInt(KEY_ZOOM_PERCENT, currentZoomPercent).apply();
-        if (zoomLabelView != null) {
-            zoomLabelView.setText(currentZoomPercent + "%");
-        }
-        applyZoomToTextViews();
-    }
+    // ==================== 7. FILE OPERATIONS (NEW, RENAME, DUPLICATE, DELETE, BACKUP) ====================
 
-    private void applyZoomToTextViews() {
-        float baseSp = 17f;
-        float scaledSp = baseSp * (currentZoomPercent / 100f);
-        if (documentEditor != null) {
-            documentEditor.setTextSize(TypedValue.COMPLEX_UNIT_SP, scaledSp);
-        }
-        if (readViewText != null) {
-            readViewText.setTextSize(TypedValue.COMPLEX_UNIT_SP, scaledSp);
-        }
-    }
-
-    private void updateStatsCounter(String text) {
-        if (statsBarText == null) return;
-        if (text == null || text.isEmpty()) {
-            statsBarText.setText("الكلمات: 0   •   الحروف: 0   •   الأسطر: 0");
+    private void onNewFileClicked() {
+        if (folderUri == null) {
+            Toast.makeText(this, "يرجى اختيار مجلد لحفظ الملفات أولاً", Toast.LENGTH_SHORT).show();
+            pickFolder();
             return;
         }
-        int chars = text.length();
-        String trimmed = text.trim();
-        int words = trimmed.isEmpty() ? 0 : trimmed.split("\\s+").length;
-        int lines = text.split("\r\n|\r|\n", -1).length;
-        statsBarText.setText("الكلمات: " + words + "   •   الحروف: " + chars + "   •   الأسطر: " + lines);
+
+        AlertDialog.Builder b = new AlertDialog.Builder(this);
+        b.setTitle("إنشاء ملف نصي جديد");
+
+        EditText input = new EditText(this);
+        input.setHint("اسم الملف (مثال: مقالة التراث الحضرمي)");
+        input.setSingleLine(true);
+        input.setTypeface(getAppTypeface(false));
+        input.setPadding(dp(18), dp(14), dp(18), dp(14));
+        b.setView(input);
+
+        b.setPositiveButton("إنشاء", (d, w) -> {
+            String rawName = input.getText().toString().trim();
+            if (rawName.isEmpty()) {
+                SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.US);
+                rawName = "مذكرة_" + sdf.format(new Date());
+            }
+            createNewTxtFile(rawName);
+        });
+        b.setNegativeButton("إلغاء", null);
+        b.show();
     }
 
-    // =========================================================================
-    // FILE OPERATIONS (SAF)
-    // =========================================================================
-
-    private void openFolderPicker() {
+    private void createNewTxtFile(String baseName) {
         try {
-            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                    | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
-                    | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
-            startActivityForResult(intent, REQ_OPEN_TREE);
-        } catch (Throwable e) {
-            Toast.makeText(this, "تعذر فتح مستعرض المجلدات", Toast.LENGTH_LONG).show();
+            String finalName = ensureTxtExtension(baseName);
+            String treeDocId = DocumentsContract.getTreeDocumentId(folderUri);
+            Uri parentDocUri = DocumentsContract.buildDocumentUriUsingTree(folderUri, treeDocId);
+            Uri newDocUri = DocumentsContract.createDocument(
+                    getContentResolver(), parentDocUri, "text/plain", finalName);
+
+            if (newDocUri != null) {
+                writeFileContent(newDocUri, "");
+                NoteFile nf = new NoteFile();
+                nf.uri = newDocUri;
+                nf.name = finalName;
+                nf.lastModified = System.currentTimeMillis();
+                nf.size = 0;
+                nf.pinned = false;
+                allFiles.add(0, nf);
+                openNoteFile(nf, ScreenState.EDIT);
+            } else {
+                Toast.makeText(this, "تعذر إنشاء الملف", Toast.LENGTH_SHORT).show();
+            }
+        } catch (Exception e) {
+            Toast.makeText(this, "خطأ أثناء إنشاء الملف: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
+    }
+
+    private void togglePinFile(NoteFile file) {
+        Set<String> pinned = new HashSet<>(prefs.getStringSet("pinned_files", new HashSet<>()));
+        String key = file.uri.toString();
+        if (pinned.contains(key)) {
+            pinned.remove(key);
+            file.pinned = false;
+            Toast.makeText(this, "تم إلغاء التثبيت", Toast.LENGTH_SHORT).show();
+        } else {
+            pinned.add(key);
+            file.pinned = true;
+            Toast.makeText(this, "تم تثبيت الملف في الأعلى", Toast.LENGTH_SHORT).show();
+        }
+        prefs.edit().putStringSet("pinned_files", pinned).apply();
+        loadFilesFromFolder();
+    }
+
+    private void showRenameDialog(NoteFile file) {
+        if (currentScreen == ScreenState.EDIT) {
+            saveCurrentFileImmediately(false);
+        }
+        AlertDialog.Builder b = new AlertDialog.Builder(this);
+        b.setTitle("إعادة تسمية الملف");
+
+        EditText input = new EditText(this);
+        input.setText(stripTxtExtension(file.name));
+        input.setSingleLine(true);
+        input.setTypeface(getAppTypeface(false));
+        input.setPadding(dp(18), dp(14), dp(18), dp(14));
+        b.setView(input);
+
+        b.setPositiveButton("حفظ الاسم", (d, w) -> {
+            String newBase = input.getText().toString().trim();
+            if (newBase.isEmpty()) return;
+            String newFullName = ensureTxtExtension(newBase);
+            try {
+                Uri renamedUri = DocumentsContract.renameDocument(getContentResolver(), file.uri, newFullName);
+                if (renamedUri != null) {
+                    file.uri = renamedUri;
+                    file.name = newFullName;
+                    if (docTitleView != null && currentScreen != ScreenState.HOME) {
+                        docTitleView.setText(stripTxtExtension(newFullName));
+                    }
+                    loadFilesFromFolder();
+                    Toast.makeText(this, "تم تغيير الاسم بنجاح", Toast.LENGTH_SHORT).show();
+                }
+            } catch (Exception e) {
+                Toast.makeText(this, "تعذر تغيير الاسم: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        });
+        b.setNegativeButton("إلغاء", null);
+        b.show();
+    }
+
+    private void duplicateFile(NoteFile file) {
+        try {
+            String content = readFileContent(file.uri);
+            String copyName = stripTxtExtension(file.name) + " - نسخة.txt";
+            String treeDocId = DocumentsContract.getTreeDocumentId(folderUri);
+            Uri parentDocUri = DocumentsContract.buildDocumentUriUsingTree(folderUri, treeDocId);
+            Uri newUri = DocumentsContract.createDocument(
+                    getContentResolver(), parentDocUri, "text/plain", copyName);
+            if (newUri != null) {
+                writeFileContent(newUri, content);
+                Toast.makeText(this, "تم إنشاء نسخة مكررة من الملف", Toast.LENGTH_SHORT).show();
+                loadFilesFromFolder();
+            }
+        } catch (Exception e) {
+            Toast.makeText(this, "تعذر نسخ الملف: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void confirmDeleteFile(NoteFile file) {
+        AlertDialog.Builder b = new AlertDialog.Builder(this);
+        b.setTitle("تأكيد حذف الملف");
+        b.setMessage("هل أنت متأكد من حذف الملف \"" + stripTxtExtension(file.name) + "\"؟");
+        b.setPositiveButton("حذف", (d, w) -> {
+            try {
+                // Save an automatic safe copy in the phone's vault directory before deletion
+                createSafeSnapshot(file, true);
+
+                boolean deleted = DocumentsContract.deleteDocument(getContentResolver(), file.uri);
+                if (deleted) {
+                    contentCache.remove(file.uri.toString());
+                    Toast.makeText(this, "تم حذف الملف", Toast.LENGTH_SHORT).show();
+                    if (currentScreen != ScreenState.HOME) {
+                        showHomeScreen(true);
+                    } else {
+                        loadFilesFromFolder();
+                    }
+                }
+            } catch (Exception e) {
+                Toast.makeText(this, "تعذر الحذف: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        });
+        b.setNegativeButton("إلغاء", null);
+        b.show();
+    }
+
+    private void shareTextContent(String title, String body) {
+        Intent sendIntent = new Intent(Intent.ACTION_SEND);
+        sendIntent.setType("text/plain");
+        sendIntent.putExtra(Intent.EXTRA_SUBJECT, stripTxtExtension(title));
+        sendIntent.putExtra(Intent.EXTRA_TEXT, body);
+        startActivity(Intent.createChooser(sendIntent, "مشاركة النص عبر"));
+    }
+
+    private void startBackupZipFlow() {
+        if (allFiles.isEmpty()) {
+            Toast.makeText(this, "لا توجد ملفات لعمل نسخة احتياطية لها", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.US);
+        String zipName = "نسخة_احتياطية_مفكرة_شفيقة_مزود_" + sdf.format(new Date()) + ".zip";
+
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/zip");
+        intent.putExtra(Intent.EXTRA_TITLE, zipName);
+        startActivityForResult(intent, REQ_CREATE_BACKUP_ZIP);
+    }
+
+    private void writeBackupZip(Uri targetZipUri) {
+        try (OutputStream os = getContentResolver().openOutputStream(targetZipUri);
+             ZipOutputStream zos = new ZipOutputStream(os)) {
+            int count = 0;
+            for (NoteFile nf : allFiles) {
+                String content = readFileContent(nf.uri);
+                ZipEntry entry = new ZipEntry(nf.name);
+                zos.putNextEntry(entry);
+                byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+                zos.write(bytes, 0, bytes.length);
+                zos.closeEntry();
+                count++;
+            }
+            zos.finish();
+            Toast.makeText(this, "تم حفظ النسخة الاحتياطية بنجاح (" + count + " ملفات)", Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            Toast.makeText(this, "فشل إنشاء النسخة الاحتياطية: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    // ==================== 8. STORAGE & NAVIGATION HELPERS ====================
+
+    private void pickFolder() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+        startActivityForResult(intent, REQ_PICK_FOLDER);
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (resultCode != Activity.RESULT_OK || data == null || data.getData() == null) return;
+        if (resultCode != RESULT_OK || data == null) return;
 
-        Uri uri = data.getData();
-        if (requestCode == REQ_OPEN_TREE) {
-            try {
-                final int takeFlags = data.getFlags()
-                        & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-                getContentResolver().takePersistableUriPermission(uri, takeFlags);
-            } catch (Throwable ignored) {
-            }
-            prefs.edit().putString(KEY_TREE_URI, uri.toString()).apply();
-            Toast.makeText(this, "تم ربط المجلد بنجاح", Toast.LENGTH_SHORT).show();
-            refreshFileList();
-        } else if (requestCode == REQ_CREATE_ZIP) {
-            performZipExport(uri);
-        }
-    }
-
-    private void refreshFileList() {
-        final String savedTree = prefs != null ? prefs.getString(KEY_TREE_URI, null) : null;
-        if (savedTree == null) {
-            allFiles.clear();
-            populateFilesList();
-            return;
-        }
-
-        ioExecutor.execute(() -> {
-            List<FileItem> loaded = new ArrayList<>();
-            try {
-                Uri treeUri = Uri.parse(savedTree);
-                String treeDocId = DocumentsContract.getTreeDocumentId(treeUri);
-                Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, treeDocId);
-
-                ContentResolver resolver = getContentResolver();
-                String[] projection = new String[]{
-                        DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                        DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                        DocumentsContract.Document.COLUMN_LAST_MODIFIED,
-                        DocumentsContract.Document.COLUMN_SIZE,
-                        DocumentsContract.Document.COLUMN_MIME_TYPE
-                };
-
-                try (Cursor c = resolver.query(childrenUri, projection, null, null, null)) {
-                    if (c != null) {
-                        while (c.moveToNext()) {
-                            String docId = c.getString(0);
-                            String name = c.getString(1);
-                            long lastMod = c.isNull(2) ? 0L : c.getLong(2);
-                            long size = c.isNull(3) ? 0L : c.getLong(3);
-                            String mime = c.isNull(4) ? "" : c.getString(4);
-
-                            if (name == null) continue;
-                            if (DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)) continue;
-                            if (!name.toLowerCase(Locale.ROOT).endsWith(".txt")) continue;
-
-                            Uri fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId);
-                            FileItem item = new FileItem();
-                            item.uri = fileUri;
-                            item.name = name;
-                            item.displayTitle = stripTxtExtension(name);
-                            item.lastModified = lastMod;
-                            item.size = size;
-                            item.cachedContent = readTextFromUri(fileUri);
-                            loaded.add(item);
-                        }
-                    }
+        if (requestCode == REQ_PICK_FOLDER) {
+            Uri treeUri = data.getData();
+            if (treeUri != null) {
+                final int takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION;
+                try {
+                    getContentResolver().takePersistableUriPermission(treeUri, takeFlags);
+                } catch (Exception ignored) {
                 }
-                Collections.sort(loaded);
-            } catch (Throwable ignored) {
+                folderUri = treeUri;
+                prefs.edit().putString("folder_uri", treeUri.toString()).apply();
+                contentCache.clear();
+                showHomeScreen(true);
             }
-
-            mainHandler.post(() -> {
-                allFiles.clear();
-                allFiles.addAll(loaded);
-                populateFilesList();
-            });
-        });
-    }
-
-    private void showNewFileDialog() {
-        String savedTree = prefs.getString(KEY_TREE_URI, null);
-        if (savedTree == null) {
-            Toast.makeText(this, "يرجى اختيار مجلد الحفظ أولاً", Toast.LENGTH_SHORT).show();
-            openFolderPicker();
-            return;
-        }
-
-        final Dialog dialog = new Dialog(this);
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        box.setBackground(makeRoundedRect(COLOR_CARD_BG, dp(18), 0, 0));
-        box.setPadding(dp(20), dp(20), dp(20), dp(16));
-
-        TextView title = new TextView(this);
-        title.setText("إنشاء ملف نصي جديد");
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
-        title.setTypeface(getAppTypeface(Typeface.BOLD));
-        title.setTextColor(currentTheme.primaryDark);
-        title.setIncludeFontPadding(false);
-        title.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams tLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        tLp.bottomMargin = dp(12);
-        box.addView(title, tLp);
-
-        final EditText nameInput = new EditText(this);
-        nameInput.setHint("اكتب اسم الملف...");
-        nameInput.setHintTextColor(COLOR_TEXT_MUTED);
-        nameInput.setTextColor(COLOR_TEXT_DARK);
-        nameInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        nameInput.setTypeface(getAppTypeface(Typeface.NORMAL));
-        nameInput.setSingleLine(true);
-        nameInput.setBackground(makeRoundedRect(0xFFF8FAFC, dp(12), COLOR_BORDER, dp(1)));
-        nameInput.setPadding(dp(12), dp(10), dp(12), dp(10));
-        LinearLayout.LayoutParams inLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        inLp.bottomMargin = dp(16);
-        box.addView(nameInput, inLp);
-
-        LinearLayout btnRow = new LinearLayout(this);
-        btnRow.setOrientation(LinearLayout.HORIZONTAL);
-
-        Button cancelBtn = createSecondaryButton("إلغاء");
-        cancelBtn.setOnClickListener(v -> dialog.dismiss());
-        LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        cLp.leftMargin = dp(6);
-        btnRow.addView(cancelBtn, cLp);
-
-        Button createBtn = createPrimaryButton("إنشاء وفتح");
-        createBtn.setOnClickListener(v -> {
-            String rawName = nameInput.getText().toString().trim();
-            if (rawName.isEmpty()) {
-                Toast.makeText(this, "يرجى كتابة اسم للملف", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            dialog.dismiss();
-            createNewFile(rawName);
-        });
-        LinearLayout.LayoutParams okLp = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        okLp.rightMargin = dp(6);
-        btnRow.addView(createBtn, okLp);
-
-        box.addView(btnRow);
-        dialog.setContentView(box);
-        styleDialogWindow(dialog);
-        dialog.show();
-    }
-
-    private void createNewFile(String rawName) {
-        try {
-            String savedTree = prefs.getString(KEY_TREE_URI, null);
-            if (savedTree == null) return;
-
-            Uri treeUri = Uri.parse(savedTree);
-            String parentDocId = DocumentsContract.getTreeDocumentId(treeUri);
-            Uri parentDocUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, parentDocId);
-
-            String fileName = rawName.toLowerCase(Locale.ROOT).endsWith(".txt") ? rawName : rawName + ".txt";
-            Uri newDocUri = DocumentsContract.createDocument(
-                    getContentResolver(), parentDocUri, "text/plain", fileName);
-
-            if (newDocUri != null) {
-                writeTextToUri(newDocUri, "");
-                FileItem newItem = new FileItem();
-                newItem.uri = newDocUri;
-                newItem.name = fileName;
-                newItem.displayTitle = stripTxtExtension(fileName);
-                newItem.lastModified = System.currentTimeMillis();
-                newItem.size = 0;
-                newItem.cachedContent = "";
-
-                activeFile = newItem;
-                activeFileContent = "";
-                currentScreen = ScreenState.EDIT;
-                renderCurrentScreen();
-                refreshFileList();
-            } else {
-                Toast.makeText(this, "تعذر إنشاء الملف", Toast.LENGTH_SHORT).show();
-            }
-        } catch (Throwable e) {
-            Toast.makeText(this, "خطأ أثناء إنشاء الملف: " + e.getMessage(), Toast.LENGTH_LONG).show();
-        }
-    }
-
-    private void openFile(FileItem item, String searchHighlightQuery) {
-        activeFile = item;
-        activeFileContent = item.cachedContent != null ? item.cachedContent : readTextFromUri(item.uri);
-        currentScreen = ScreenState.READ;
-        renderCurrentScreen();
-
-        if (searchHighlightQuery != null && !searchHighlightQuery.isEmpty() && readViewText != null) {
-            final int matchIndex = activeFileContent.toLowerCase(Locale.ROOT)
-                    .indexOf(searchHighlightQuery.toLowerCase(Locale.ROOT));
-            if (matchIndex >= 0) {
-                readViewText.post(() -> {
-                    try {
-                        if (readViewText.getLayout() != null) {
-                            int line = readViewText.getLayout().getLineForOffset(matchIndex);
-                            int y = readViewText.getLayout().getLineTop(line);
-                            View parent = (View) readViewText.getParent();
-                            if (parent instanceof ScrollView) {
-                                ((ScrollView) parent).smoothScrollTo(0, Math.max(0, y - dp(60)));
-                            }
-                        }
-                    } catch (Throwable ignored) {
-                    }
-                });
+        } else if (requestCode == REQ_CREATE_BACKUP_ZIP) {
+            Uri zipUri = data.getData();
+            if (zipUri != null) {
+                writeBackupZip(zipUri);
             }
         }
     }
 
-    private void saveActiveDocument(boolean showToast) {
-        if (activeFile == null || activeFile.uri == null) return;
-        if (currentScreen == ScreenState.EDIT && documentEditor != null) {
-            activeFileContent = documentEditor.getText().toString();
-        }
-        boolean ok = writeTextToUri(activeFile.uri, activeFileContent);
-        if (ok) {
-            activeFile.cachedContent = activeFileContent;
-            activeFile.lastModified = System.currentTimeMillis();
-            activeFile.size = activeFileContent.getBytes(StandardCharsets.UTF_8).length;
-            if (showToast) {
-                Toast.makeText(this, "تم حفظ التعديلات", Toast.LENGTH_SHORT).show();
-            }
-            refreshFileList();
-        } else if (showToast) {
-            Toast.makeText(this, "حدث خطأ أثناء حفظ الملف", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    private void showRenameDialog(final FileItem item, final boolean fromDocumentHeader) {
-        final Dialog dialog = new Dialog(this);
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        box.setBackground(makeRoundedRect(COLOR_CARD_BG, dp(18), 0, 0));
-        box.setPadding(dp(20), dp(20), dp(20), dp(16));
-
-        TextView title = new TextView(this);
-        title.setText("إعادة تسمية الملف");
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
-        title.setTypeface(getAppTypeface(Typeface.BOLD));
-        title.setTextColor(currentTheme.primaryDark);
-        title.setIncludeFontPadding(false);
-        title.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams tLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        tLp.bottomMargin = dp(12);
-        box.addView(title, tLp);
-
-        final EditText input = new EditText(this);
-        input.setText(item.displayTitle);
-        input.setSelection(input.getText().length());
-        input.setTextColor(COLOR_TEXT_DARK);
-        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        input.setTypeface(getAppTypeface(Typeface.NORMAL));
-        input.setSingleLine(true);
-        input.setBackground(makeRoundedRect(0xFFF8FAFC, dp(12), COLOR_BORDER, dp(1)));
-        input.setPadding(dp(12), dp(10), dp(12), dp(10));
-        LinearLayout.LayoutParams inLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        inLp.bottomMargin = dp(16);
-        box.addView(input, inLp);
-
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-
-        Button cancelBtn = createSecondaryButton("إلغاء");
-        cancelBtn.setOnClickListener(v -> dialog.dismiss());
-        LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        cLp.leftMargin = dp(6);
-        row.addView(cancelBtn, cLp);
-
-        Button saveBtn = createPrimaryButton("حفظ الاسم");
-        saveBtn.setOnClickListener(v -> {
-            String newTitle = input.getText().toString().trim();
-            if (newTitle.isEmpty()) {
-                Toast.makeText(this, "الاسم لا يمكن أن يكون فارغاً", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            dialog.dismiss();
-            renameFileItem(item, newTitle, fromDocumentHeader);
-        });
-        LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        sLp.rightMargin = dp(6);
-        row.addView(saveBtn, sLp);
-
-        box.addView(row);
-        dialog.setContentView(box);
-        styleDialogWindow(dialog);
-        dialog.show();
-    }
-
-    private void renameFileItem(FileItem item, String rawNewName, boolean fromDocumentHeader) {
-        try {
-            if (currentScreen == ScreenState.EDIT) {
-                saveActiveDocument(false);
-            }
-            String fullNewName = rawNewName.toLowerCase(Locale.ROOT).endsWith(".txt")
-                    ? rawNewName : rawNewName + ".txt";
-
-            Uri renamedUri = DocumentsContract.renameDocument(getContentResolver(), item.uri, fullNewName);
-            if (renamedUri != null) {
-                item.uri = renamedUri;
-                item.name = fullNewName;
-                item.displayTitle = stripTxtExtension(fullNewName);
-                if (fromDocumentHeader && docTitleView != null) {
-                    docTitleView.setText(item.displayTitle);
-                }
-                Toast.makeText(this, "تم تغيير اسم الملف", Toast.LENGTH_SHORT).show();
-                refreshFileList();
-            } else {
-                Toast.makeText(this, "تعذر إعادة تسمية الملف", Toast.LENGTH_SHORT).show();
-            }
-        } catch (Throwable e) {
-            Toast.makeText(this, "خطأ أثناء التسمية: " + e.getMessage(), Toast.LENGTH_LONG).show();
-        }
-    }
-
-    private void showDeleteConfirmDialog(final FileItem item) {
-        final Dialog dialog = new Dialog(this);
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        box.setBackground(makeRoundedRect(COLOR_CARD_BG, dp(18), 0, 0));
-        box.setPadding(dp(20), dp(20), dp(20), dp(16));
-
-        TextView title = new TextView(this);
-        title.setText("تأكيد حذف الملف");
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
-        title.setTypeface(getAppTypeface(Typeface.BOLD));
-        title.setTextColor(0xFFB91C1C);
-        title.setIncludeFontPadding(false);
-        title.setGravity(Gravity.CENTER);
-        box.addView(title);
-
-        TextView msg = new TextView(this);
-        msg.setText("هل أنت متأكد من حذف الملف «" + item.displayTitle + "» نهائياً؟");
-        msg.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        msg.setTypeface(getAppTypeface(Typeface.NORMAL));
-        msg.setTextColor(COLOR_TEXT_DARK);
-        msg.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        mLp.topMargin = dp(10);
-        mLp.bottomMargin = dp(18);
-        box.addView(msg, mLp);
-
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-
-        Button cancelBtn = createSecondaryButton("إلغاء");
-        cancelBtn.setOnClickListener(v -> dialog.dismiss());
-        LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        cLp.leftMargin = dp(6);
-        row.addView(cancelBtn, cLp);
-
-        Button delBtn = new Button(this);
-        delBtn.setText("حذف نهائياً");
-        delBtn.setAllCaps(false);
-        delBtn.setTextColor(Color.WHITE);
-        delBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        delBtn.setTypeface(getAppTypeface(Typeface.BOLD));
-        delBtn.setIncludeFontPadding(false);
-        delBtn.setGravity(Gravity.CENTER);
-        delBtn.setBackground(makeRoundedRect(0xFFDC2626, dp(12), 0, 0));
-        delBtn.setOnClickListener(v -> {
-            dialog.dismiss();
-            deleteFileItem(item);
-        });
-        LinearLayout.LayoutParams dLp = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        dLp.rightMargin = dp(6);
-        row.addView(delBtn, dLp);
-
-        box.addView(row);
-        dialog.setContentView(box);
-        styleDialogWindow(dialog);
-        dialog.show();
-    }
-
-    private void deleteFileItem(FileItem item) {
-        try {
-            boolean deleted = DocumentsContract.deleteDocument(getContentResolver(), item.uri);
-            if (deleted) {
-                Toast.makeText(this, "تم حذف الملف", Toast.LENGTH_SHORT).show();
-                if (activeFile != null && item.uri.equals(activeFile.uri)) {
-                    activeFile = null;
-                    currentScreen = ScreenState.HOME;
-                    renderCurrentScreen();
-                }
-                refreshFileList();
-            } else {
-                Toast.makeText(this, "تعذر حذف الملف", Toast.LENGTH_SHORT).show();
-            }
-        } catch (Throwable e) {
-            Toast.makeText(this, "خطأ أثناء الحذف: " + e.getMessage(), Toast.LENGTH_LONG).show();
-        }
-    }
-
-    private void shareCurrentDocument() {
-        if (activeFile == null) return;
-        if (currentScreen == ScreenState.EDIT && documentEditor != null) {
-            saveActiveDocument(false);
-        }
-        Intent sendIntent = new Intent(Intent.ACTION_SEND);
-        sendIntent.setType("text/plain");
-        sendIntent.putExtra(Intent.EXTRA_SUBJECT, activeFile.displayTitle);
-        sendIntent.putExtra(Intent.EXTRA_TEXT, activeFileContent);
-        startActivity(Intent.createChooser(sendIntent, "مشاركة النص عبر:"));
-    }
-
-    private void startBackupFlow() {
-        if (allFiles.isEmpty()) {
-            Toast.makeText(this, "لا توجد ملفات لعمل نسخة احتياطية لها", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        try {
-            SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMdd_HHmm", Locale.US);
-            String zipName = "Mazwd_Backup_" + sdf.format(new Date()) + ".zip";
-            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            intent.setType("application/zip");
-            intent.putExtra(Intent.EXTRA_TITLE, zipName);
-            startActivityForResult(intent, REQ_CREATE_ZIP);
-        } catch (Throwable e) {
-            Toast.makeText(this, "تعذر إنشاء ملف النسخة الاحتياطية", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    private void performZipExport(final Uri zipUri) {
-        Toast.makeText(this, "جاري تجهيز النسخة الاحتياطية...", Toast.LENGTH_SHORT).show();
-        ioExecutor.execute(() -> {
-            int count = 0;
-            try (OutputStream os = getContentResolver().openOutputStream(zipUri);
-                 ZipOutputStream zos = new ZipOutputStream(os)) {
-                for (FileItem item : allFiles) {
-                    String content = item.cachedContent != null
-                            ? item.cachedContent : readTextFromUri(item.uri);
-                    ZipEntry entry = new ZipEntry(item.name);
-                    zos.putNextEntry(entry);
-                    byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
-                    zos.write(bytes, 0, bytes.length);
-                    zos.closeEntry();
-                    count++;
-                }
-                zos.finish();
-                final int finalCount = count;
-                mainHandler.post(() -> Toast.makeText(this,
-                        "تم حفظ النسخة الاحتياطية بنجاح (" + finalCount + " ملفات)",
-                        Toast.LENGTH_LONG).show());
-            } catch (Throwable e) {
-                mainHandler.post(() -> Toast.makeText(this,
-                        "فشل التصدير: " + e.getMessage(), Toast.LENGTH_LONG).show());
-            }
-        });
-    }
-
-    private String readTextFromUri(Uri uri) {
+    private String readFileContent(Uri uri) {
         StringBuilder sb = new StringBuilder();
         try (InputStream is = getContentResolver().openInputStream(uri);
              BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
@@ -2558,36 +3195,56 @@ public class MainActivity extends Activity {
                 sb.append(line);
                 first = false;
             }
-        } catch (Throwable ignored) {
+        } catch (Exception ignored) {
         }
         return sb.toString();
     }
 
-    private boolean writeTextToUri(Uri uri, String content) {
+    private void writeFileContent(Uri uri, String content) {
         try (OutputStream os = getContentResolver().openOutputStream(uri, "wt")) {
-            if (os == null) return false;
-            os.write(content.getBytes(StandardCharsets.UTF_8));
-            os.flush();
-            return true;
-        } catch (Throwable e) {
-            return false;
+            if (os != null) {
+                os.write(content.getBytes(StandardCharsets.UTF_8));
+                os.flush();
+            }
+        } catch (Exception e) {
+            try (OutputStream os = getContentResolver().openOutputStream(uri)) {
+                if (os != null) {
+                    os.write(content.getBytes(StandardCharsets.UTF_8));
+                    os.flush();
+                }
+            } catch (Exception ignored) {
+            }
         }
     }
 
-    // =========================================================================
-    // NAVIGATION & HELPERS
-    // =========================================================================
+    private final Runnable autoSaveRunnable = () -> saveCurrentFileImmediately(false);
+
+    private void scheduleAutoSave() {
+        autoSaveHandler.removeCallbacks(autoSaveRunnable);
+        autoSaveHandler.postDelayed(autoSaveRunnable, 1200);
+    }
+
+    private void saveCurrentFileImmediately(boolean showToast) {
+        autoSaveHandler.removeCallbacks(autoSaveRunnable);
+        if (currentFile == null || editorEditText == null || !isDirty) return;
+        String text = editorEditText.getText().toString();
+        writeFileContent(currentFile.uri, text);
+        contentCache.put(currentFile.uri.toString(), text);
+        currentFile.lastModified = System.currentTimeMillis();
+        currentFile.size = text.getBytes(StandardCharsets.UTF_8).length;
+        isDirty = false;
+        if (showToast) {
+            Toast.makeText(this, "تم الحفظ", Toast.LENGTH_SHORT).show();
+        }
+    }
 
     private void handleBackNavigation() {
         if (currentScreen == ScreenState.EDIT) {
-            saveActiveDocument(true);
-            hideKeyboard();
-            currentScreen = ScreenState.READ;
-            renderCurrentScreen();
+            saveCurrentFileImmediately(false);
+            switchDocumentMode(ScreenState.READ);
         } else if (currentScreen == ScreenState.READ) {
-            hideKeyboard();
-            currentScreen = ScreenState.HOME;
-            renderCurrentScreen();
+            saveCurrentFileImmediately(false);
+            showHomeScreen(true);
         } else {
             finish();
         }
@@ -2602,155 +3259,40 @@ public class MainActivity extends Activity {
         }
     }
 
-    private Spannable applySearchHighlight(String fullText, String query) {
-        SpannableString spannable = new SpannableString(fullText);
-        if (query == null || query.isEmpty()) return spannable;
-
-        String lowerFull = fullText.toLowerCase(Locale.ROOT);
-        String lowerQuery = query.toLowerCase(Locale.ROOT);
-
-        int start = 0;
-        while (true) {
-            int idx = lowerFull.indexOf(lowerQuery, start);
-            if (idx < 0) break;
-            int end = idx + lowerQuery.length();
-            spannable.setSpan(new BackgroundColorSpan(COLOR_SEARCH_HIGHLIGHT),
-                    idx, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-            spannable.setSpan(new ForegroundColorSpan(Color.BLACK),
-                    idx, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-            start = end;
-        }
-        return spannable;
-    }
-
-    private String extractSearchSnippet(String content, String query) {
-        String lowerContent = content.toLowerCase(Locale.ROOT);
-        String lowerQuery = query.toLowerCase(Locale.ROOT);
-        int idx = lowerContent.indexOf(lowerQuery);
-        if (idx < 0) return null;
-
-        int start = Math.max(0, idx - 35);
-        int end = Math.min(content.length(), idx + query.length() + 45);
-        String sub = content.substring(start, end).replace("\n", " ");
-        return (start > 0 ? "..." : "") + sub + (end < content.length() ? "..." : "");
-    }
-
-    private int getTextDirectionGravity(String text) {
-        if (text == null || text.isEmpty()) return Gravity.RIGHT;
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (Character.isLetter(c)) {
-                byte dir = Character.getDirectionality(c);
-                if (dir == Character.DIRECTIONALITY_LEFT_TO_RIGHT) {
-                    return Gravity.LEFT;
-                }
-                return Gravity.RIGHT;
-            }
-        }
-        return Gravity.RIGHT;
-    }
-
-    private String stripTxtExtension(String name) {
-        if (name != null && name.toLowerCase(Locale.ROOT).endsWith(".txt")) {
-            return name.substring(0, name.length() - 4);
-        }
-        return name != null ? name : "";
-    }
-
-    private String formatFileSize(long bytes) {
-        if (bytes < 1024) return bytes + " بايت";
-        double kb = bytes / 1024.0;
-        if (kb < 1024) return String.format(Locale.US, "%.1f ك.ب", kb);
-        double mb = kb / 1024.0;
-        return String.format(Locale.US, "%.2f م.ب", mb);
-    }
-
-    private Button createPrimaryButton(String text) {
-        Button btn = new Button(this);
-        btn.setText(text);
-        btn.setAllCaps(false);
-        btn.setTextColor(Color.WHITE);
-        btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        btn.setTypeface(getAppTypeface(Typeface.BOLD));
-        btn.setIncludeFontPadding(false);
-        btn.setGravity(Gravity.CENTER);
-        btn.setBackground(makeRoundedRect(currentTheme.primary, dp(12), 0, 0));
-        btn.setPadding(dp(14), 0, dp(14), 0);
-        return btn;
-    }
-
-    private Button createSecondaryButton(String text) {
-        Button btn = new Button(this);
-        btn.setText(text);
-        btn.setAllCaps(false);
-        btn.setTextColor(currentTheme.primaryDark);
-        btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        btn.setTypeface(getAppTypeface(Typeface.BOLD));
-        btn.setIncludeFontPadding(false);
-        btn.setGravity(Gravity.CENTER);
-        btn.setBackground(makeRoundedRect(currentTheme.accentLight, dp(12), COLOR_BORDER, dp(1)));
-        btn.setPadding(dp(14), 0, dp(14), 0);
-        return btn;
-    }
-
-    private GradientDrawable makeRoundedRect(int fillColor, float radius, int strokeColor, int strokeWidth) {
-        GradientDrawable gd = new GradientDrawable();
-        gd.setShape(GradientDrawable.RECTANGLE);
-        gd.setColor(fillColor);
-        gd.setCornerRadius(radius);
-        if (strokeWidth > 0) {
-            gd.setStroke(strokeWidth, strokeColor);
-        }
-        return gd;
-    }
-
-    private GradientDrawable makeCircle(int fillColor, int strokeColor, int strokeWidth) {
-        GradientDrawable gd = new GradientDrawable();
-        gd.setShape(GradientDrawable.OVAL);
-        gd.setColor(fillColor);
-        if (strokeWidth > 0) {
-            gd.setStroke(strokeWidth, strokeColor);
-        }
-        return gd;
-    }
-
-    private void styleDialogWindow(Dialog dialog) {
-        Window window = dialog.getWindow();
-        if (window != null) {
-            window.setBackgroundDrawableResource(android.R.color.transparent);
-            WindowManager.LayoutParams lp = new WindowManager.LayoutParams();
-            lp.copyFrom(window.getAttributes());
-            lp.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.92f);
-            lp.height = WindowManager.LayoutParams.WRAP_CONTENT;
-            window.setAttributes(lp);
-        }
-    }
-
-    private void showKeyboard(View view) {
-        try {
-            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-            if (imm != null) {
-                imm.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT);
-            }
-        } catch (Throwable ignored) {
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (currentScreen == ScreenState.EDIT || currentScreen == ScreenState.READ) {
+            saveCurrentFileImmediately(false);
         }
     }
 
     private void hideKeyboard() {
-        try {
-            View v = getCurrentFocus();
-            if (v != null) {
-                InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-                if (imm != null) {
-                    imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
-                }
-            }
-        } catch (Throwable ignored) {
+        View v = getCurrentFocus();
+        if (v != null) {
+            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm != null) imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
         }
     }
 
-    private int dp(int value) {
-        return Math.round(TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_DIP, value, getResources().getDisplayMetrics()));
+    private String stripTxtExtension(String name) {
+        if (name == null) return "";
+        if (name.toLowerCase(Locale.ROOT).endsWith(".txt")) {
+            return name.substring(0, name.length() - 4);
+        }
+        return name;
+    }
+
+    private String ensureTxtExtension(String name) {
+        if (name.toLowerCase(Locale.ROOT).endsWith(".txt")) return name;
+        return name + ".txt";
+    }
+
+    private String formatSize(long bytes) {
+        if (bytes < 1024) return bytes + " بايت";
+        double kb = bytes / 1024.0;
+        if (kb < 1024) return String.format(Locale.US, "%.1f ك.ب", kb);
+        double mb = kb / 1024.0;
+        return String.format(Locale.US, "%.1f م.ب", mb);
     }
 }
