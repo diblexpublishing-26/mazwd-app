@@ -16,8 +16,8 @@ jobs:
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
           distribution: 'temurin'
+          java-version: '17'
 
       - name: Cache Fixed Signing Keystore
         uses: actions/cache@v4
@@ -25,7 +25,7 @@ jobs:
           path: ~/.android/mazwd_fixed.keystore
           key: mazwd-fixed-signing-keystore-permanent-v1
 
-      - name: Generate Fixed Keystore if Missing
+      - name: Generate Fixed Keystore If Not Cached
         run: |
           mkdir -p ~/.android
           if [ ! -f ~/.android/mazwd_fixed.keystore ]; then
@@ -40,12 +40,12 @@ jobs:
               -dname "CN=Shafiqa Mazwd, OU=Heritage, O=Mazwd, L=Hadhramaut, S=Yemen, C=YE"
           fi
 
-      - name: Prepare Project Structure & Apply Surgical Refinements
+      - name: Create Android Project Structure & Configs
         run: |
           mkdir -p app/src/main/java/com/mazwd/app
           mkdir -p app/src/main/res/drawable
-          mkdir -p app/src/main/res/font
           mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/font
 
           if [ -f "MainActivity.java" ]; then
             cp MainActivity.java app/src/main/java/com/mazwd/app/MainActivity.java
@@ -55,489 +55,13 @@ jobs:
               cp "$FOUND_FILE" app/src/main/java/com/mazwd/app/MainActivity.java
             fi
           fi
+
+          if [ ! -f "app/src/main/java/com/mazwd/app/MainActivity.java" ]; then
+            echo "ERROR: MainActivity.java not found!"
+            exit 1
+          fi
+
           sed -i '/^\x60/d' app/src/main/java/com/mazwd/app/MainActivity.java
-
-          cat << 'PYEOF' > patch_app.py
-          path = "app/src/main/java/com/mazwd/app/MainActivity.java"
-          with open(path, "r", encoding="utf-8") as f:
-              code = f.read()
-
-          # 1. Replace Turquoise Theme with Luxury Diamond Black ("الأسود الماسي")
-          code = code.replace(
-              '{"التركواز الهادئ", "#115E59", "#042F2E", "#CCFBF1"}',
-              '{"الأسود الماسي", "#18181B", "#09090B", "#F4F4F5"}'
-          )
-
-          # 2. Move sliding switches in Settings to the RIGHT of the text (index 0 in RTL row)
-          old_switch_add = "row.addView(switchTrack, new LinearLayout.LayoutParams(dp(48), dp(26)));"
-          new_switch_add = (
-              "LinearLayout.LayoutParams swLp = new LinearLayout.LayoutParams(dp(48), dp(26));\n"
-              "        swLp.leftMargin = dp(12);\n"
-              "        row.addView(switchTrack, 0, swLp);"
-          )
-          if old_switch_add in code:
-              code = code.replace(old_switch_add, new_switch_add, 1)
-
-          # 3. Rename "تخصيص وترتيب أدوات التحرير" -> "تخصيص أدوات التحرير"
-          code = code.replace("تخصيص وترتيب أدوات التحرير", "تخصيص أدوات التحرير")
-
-          # 4. Remove [ نصوص | رموز ] toggle from inside Toolbar Customization Dialog
-          code = code.replace("root.addView(createToolbarModeSegmentedRow(null));", "// segmented toggle kept in Settings only", 1)
-
-          # 5. Fix "ي" dots in Font Dropdown for non-Scheherazade fonts (idx != 3)
-          old_font_item = "item.setIncludeFontPadding(false);"
-          new_font_item = "item.setIncludeFontPadding(idx != 3);"
-          if old_font_item in code:
-              code = code.replace(old_font_item, new_font_item, 1)
-
-          # 6. Create .nomedia inside Safe Vault so snapshots don't clutter Recent Files
-          old_snap_call = "Uri vaultDirUri = getOrCreateSafeVaultDirectoryUri(true);"
-          new_snap_call = (
-              "Uri vaultDirUri = getOrCreateSafeVaultDirectoryUri(true);\n"
-              "            ensureNoMediaInSafeVault(vaultDirUri);"
-          )
-          if old_snap_call in code and "ensureNoMediaInSafeVault" not in code:
-              code = code.replace(old_snap_call, new_snap_call, 1)
-
-          # 7. Enhance showStyledDialog & Home labels
-          old_styled_dialog = "    private void showStyledDialog(Dialog dialog, View rootView, float widthFraction, int heightSpec) {\n        dialog.setContentView(rootView);"
-          new_styled_dialog = (
-              "    private void showStyledDialog(Dialog dialog, View rootView, float widthFraction, int heightSpec) {\n"
-              "        prepareDialogViewHierarchy(dialog, rootView);\n"
-              "        dialog.setContentView(rootView);"
-          )
-          if old_styled_dialog in code and "prepareDialogViewHierarchy" not in code:
-              code = code.replace(old_styled_dialog, new_styled_dialog, 1)
-
-          old_home_end = "if (restoreY > 0 && homeScrollView != null) {"
-          new_home_end = "applyUnclippedArabicTextLabels(rootContainer);\n        if (restoreY > 0 && homeScrollView != null) {"
-          if old_home_end in code and "applyUnclippedArabicTextLabels(rootContainer)" not in code:
-              code = code.replace(old_home_end, new_home_end, 1)
-
-          # 8. Intercept Reset Default button click cleanly with confirmation dialog
-          old_clear = "currentOrder.clear();"
-          new_clear = "if (!isResetToolbarConfirmed) { showResetToolbarConfirmDialog(v); return; } isResetToolbarConfirmed = false; currentOrder.clear();"
-          if old_clear in code and "isResetToolbarConfirmed" not in code and "showResetToolbarConfirmDialog" not in code:
-              code = code.replace(old_clear, new_clear, 1)
-
-          extra_blocks = []
-
-          if "ensureNoMediaInSafeVault" not in code:
-              extra_blocks.extend([
-                  "    private void ensureNoMediaInSafeVault(Uri vaultDirUri) {",
-                  "        if (folderUri == null || vaultDirUri == null) return;",
-                  "        try {",
-                  "            String vaultDocId = DocumentsContract.getDocumentId(vaultDirUri);",
-                  "            Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(folderUri, vaultDocId);",
-                  "            String[] proj = new String[]{DocumentsContract.Document.COLUMN_DISPLAY_NAME};",
-                  "            boolean exists = false;",
-                  "            try (Cursor c = getContentResolver().query(childrenUri, proj, null, null, null)) {",
-                  "                if (c != null) {",
-                  "                    while (c.moveToNext()) {",
-                  "                        if (\".nomedia\".equals(c.getString(0))) {",
-                  "                            exists = true;",
-                  "                            break;",
-                  "                        }",
-                  "                    }",
-                  "                }",
-                  "            }",
-                  "            if (!exists) {",
-                  "                DocumentsContract.createDocument(getContentResolver(), vaultDirUri, \"application/octet-stream\", \".nomedia\");",
-                  "            }",
-                  "        } catch (Exception ignored) {",
-                  "        }",
-                  "    }",
-                  ""
-              ])
-
-          if "onWindowFocusChanged(" not in code:
-              extra_blocks.extend([
-                  "    @Override",
-                  "    public void onWindowFocusChanged(boolean hasFocus) {",
-                  "        super.onWindowFocusChanged(hasFocus);",
-                  "        if (!hasFocus && currentScreen == ScreenState.EDIT) {",
-                  "            saveCurrentFileImmediately(false);",
-                  "        }",
-                  "    }",
-                  ""
-              ])
-
-          if "protected void onStop(" not in code and "public void onStop(" not in code:
-              extra_blocks.extend([
-                  "    @Override",
-                  "    protected void onStop() {",
-                  "        if (currentScreen == ScreenState.EDIT) {",
-                  "            saveCurrentFileImmediately(false);",
-                  "        }",
-                  "        super.onStop();",
-                  "    }",
-                  ""
-              ])
-
-          if "applyUnclippedArabicTextLabels" not in code:
-              extra_blocks.extend([
-                  "    private void applyUnclippedArabicTextLabels(View view) {",
-                  "        if (view == null) return;",
-                  "        boolean allowFontPad = (getSelectedFontIndex() != 3);",
-                  "        if (view.getClass() == TextView.class && view != readTextView && view.getBackground() == null) {",
-                  "            ((TextView) view).setIncludeFontPadding(allowFontPad);",
-                  "        }",
-                  "        if (view instanceof ViewGroup) {",
-                  "            ViewGroup vg = (ViewGroup) view;",
-                  "            for (int i = 0; i < vg.getChildCount(); i++) {",
-                  "                applyUnclippedArabicTextLabels(vg.getChildAt(i));",
-                  "            }",
-                  "        }",
-                  "    }",
-                  ""
-              ])
-
-          if "prepareDialogViewHierarchy" not in code:
-              extra_blocks.extend([
-                  "    private void prepareDialogViewHierarchy(Dialog dialog, View rootView) {",
-                  "        if (rootView == null) return;",
-                  "        applyUnclippedArabicTextLabels(rootView);",
-                  "        rootView.setPadding(",
-                  "                rootView.getPaddingLeft(),",
-                  "                rootView.getPaddingTop(),",
-                  "                rootView.getPaddingRight(),",
-                  "                rootView.getPaddingBottom() + dp(4)",
-                  "        );",
-                  "        fixDialogButtonsAndResetLayout(rootView, rootView);",
-                  "    }",
-                  "",
-                  "    private void fixDialogButtonsAndResetLayout(View current, View rootView) {",
-                  "        if (current instanceof Button) {",
-                  "            Button btn = (Button) current;",
-                  "            ViewGroup.LayoutParams lp = btn.getLayoutParams();",
-                  "            if (lp instanceof ViewGroup.MarginLayoutParams) {",
-                  "                ViewGroup.MarginLayoutParams mlp = (ViewGroup.MarginLayoutParams) lp;",
-                  "                mlp.topMargin = Math.max(mlp.topMargin, dp(1));",
-                  "                mlp.bottomMargin = Math.max(mlp.bottomMargin, dp(3));",
-                  "                btn.setLayoutParams(mlp);",
-                  "            }",
-                  "            CharSequence txt = btn.getText();",
-                  "            if (txt != null && txt.toString().contains(\"الافتراضي\") && rootView instanceof LinearLayout) {",
-                  "                LinearLayout rootLinear = (LinearLayout) rootView;",
-                  "                if (btn.getParent() instanceof ViewGroup) {",
-                  "                    ViewGroup parentGroup = (ViewGroup) btn.getParent();",
-                  "                    if (parentGroup != rootLinear || rootLinear.indexOfChild(btn) > 3) {",
-                  "                        parentGroup.removeView(btn);",
-                  "                        LinearLayout.LayoutParams topBtnLp = new LinearLayout.LayoutParams(",
-                  "                                ViewGroup.LayoutParams.MATCH_PARENT, dp(42));",
-                  "                        topBtnLp.topMargin = dp(8);",
-                  "                        topBtnLp.bottomMargin = dp(8);",
-                  "                        int insertIdx = Math.min(2, rootLinear.getChildCount());",
-                  "                        rootLinear.addView(btn, insertIdx, topBtnLp);",
-                  "                    }",
-                  "                }",
-                  "            }",
-                  "        } else if (current instanceof ViewGroup) {",
-                  "            ViewGroup vg = (ViewGroup) current;",
-                  "            vg.setClipChildren(false);",
-                  "            vg.setClipToPadding(false);",
-                  "            List<View> children = new ArrayList<>();",
-                  "            for (int i = 0; i < vg.getChildCount(); i++) {",
-                  "                children.add(vg.getChildAt(i));",
-                  "            }",
-                  "            for (View child : children) {",
-                  "                fixDialogButtonsAndResetLayout(child, rootView);",
-                  "            }",
-                  "        }",
-                  "    }",
-                  ""
-              ])
-
-          if "showResetToolbarConfirmDialog" not in code:
-              extra_blocks.extend([
-                  "    private boolean isResetToolbarConfirmed = false;",
-                  "",
-                  "    private void showResetToolbarConfirmDialog(View resetBtn) {",
-                  "        Dialog confirmDialog = new Dialog(this);",
-                  "        confirmDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);",
-                  "        LinearLayout box = new LinearLayout(this);",
-                  "        box.setOrientation(LinearLayout.VERTICAL);",
-                  "        box.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);",
-                  "        box.setBackground(roundedRect(getCardBgColor(), 18, 1, getBorderColor()));",
-                  "        box.setPadding(dp(20), dp(18), dp(20), dp(16));",
-                  "",
-                  "        TextView title = new TextView(this);",
-                  "        title.setText(\"استعادة الإعدادات الافتراضية\");",
-                  "        title.setTextColor(getAccentTextColor());",
-                  "        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);",
-                  "        title.setTypeface(getAppTypeface(true));",
-                  "        title.setGravity(Gravity.RIGHT);",
-                  "        box.addView(title);",
-                  "",
-                  "        TextView msg = new TextView(this);",
-                  "        msg.setText(\"هل أنت متأكد أنك تريد استعادة الإعدادات الافتراضية؟\");",
-                  "        msg.setTextColor(getTextPrimaryColor());",
-                  "        msg.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);",
-                  "        msg.setTypeface(getAppTypeface(false));",
-                  "        msg.setGravity(Gravity.RIGHT);",
-                  "        LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(",
-                  "                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);",
-                  "        mLp.topMargin = dp(10);",
-                  "        mLp.bottomMargin = dp(18);",
-                  "        box.addView(msg, mLp);",
-                  "",
-                  "        LinearLayout btnRow = new LinearLayout(this);",
-                  "        btnRow.setOrientation(LinearLayout.HORIZONTAL);",
-                  "",
-                  "        Button yesBtn = new Button(this);",
-                  "        configureTextButton(yesBtn, \"نعم\", 14, true, Color.WHITE, 44);",
-                  "        yesBtn.setBackground(roundedRect(getPrimaryColor(), 10, 0, 0));",
-                  "        yesBtn.setOnClickListener(v -> {",
-                  "            confirmDialog.dismiss();",
-                  "            isResetToolbarConfirmed = true;",
-                  "            if (resetBtn != null) resetBtn.performClick();",
-                  "        });",
-                  "        LinearLayout.LayoutParams b1Lp = new LinearLayout.LayoutParams(0, dp(44), 1f);",
-                  "        b1Lp.leftMargin = dp(6);",
-                  "        btnRow.addView(yesBtn, b1Lp);",
-                  "",
-                  "        Button noBtn = new Button(this);",
-                  "        configureTextButton(noBtn, \"لا\", 14, true, getTextPrimaryColor(), 44);",
-                  "        noBtn.setBackground(roundedRect(getSecondaryBtnBgColor(), 10, 1, getBorderColor()));",
-                  "        noBtn.setOnClickListener(v -> confirmDialog.dismiss());",
-                  "        LinearLayout.LayoutParams b2Lp = new LinearLayout.LayoutParams(0, dp(44), 1f);",
-                  "        b2Lp.rightMargin = dp(6);",
-                  "        btnRow.addView(noBtn, b2Lp);",
-                  "",
-                  "        box.addView(btnRow);",
-                  "        showStyledDialog(confirmDialog, box, 0.86f, ViewGroup.LayoutParams.WRAP_CONTENT);",
-                  "    }",
-                  ""
-              ])
-
-          if extra_blocks:
-              last_brace = code.rfind("}")
-              if last_brace != -1:
-                  code = code[:last_brace] + "\n" + "\n".join(extra_blocks) + "\n}\n"
-
-          with open(path, "w", encoding="utf-8") as f:
-              f.write(code)
-          PYEOF
-          python3 patch_app.py
-          rm -f patch_app.py
-
-      - name: Download All 12 Open-Source Arabic Fonts
-        run: |
-          cd app/src/main/res/font
-          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/almarai/Almarai-Regular.ttf" -o mazwd_arabic.ttf
-          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/almarai/Almarai-Bold.ttf" -o mazwd_arabic_bold.ttf
-          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/arefruqaa/ArefRuqaa-Regular.ttf" -o aref_ruqaa.ttf
-          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/arefruqaa/ArefRuqaa-Bold.ttf" -o aref_ruqaa_bold.ttf
-          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/tajawal/Tajawal-Regular.ttf" -o tajawal_regular.ttf
-          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/tajawal/Tajawal-Bold.ttf" -o tajawal_bold.ttf
-          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/reemkufi/ReemKufi%5Bwght%5D.ttf" -o reem_kufi.ttf
-          cp reem_kufi.ttf reem_kufi_bold.ttf
-          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/scheherazadenew/ScheherazadeNew-Bold.ttf" -o scheherazade_bold.ttf
-          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/readexpro/ReadexPro%5BHEXP%2Cwght%5D.ttf" -o readex_pro.ttf
-          cp readex_pro.ttf readex_pro_bold.ttf
-          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansarabic/NotoSansArabic%5Bwdth%2Cwght%5D.ttf" -o noto_sans_arabic.ttf
-          cp noto_sans_arabic.ttf noto_sans_arabic_bold.ttf
-          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/notonaskharabic/NotoNaskhArabic%5Bwght%5D.ttf" -o noto_naskh_arabic.ttf
-          cp noto_naskh_arabic.ttf noto_naskh_arabic_bold.ttf
-          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic/IBMPlexSansArabic-Regular.ttf" -o ibm_plex_arabic.ttf
-          curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic/IBMPlexSansArabic-Bold.ttf" -o ibm_plex_arabic_bold.ttf
-
-      - name: Generate Luxury Royal Navy App Icon & All Vector Icons
-        run: |
-          cat << 'EOF' > app/src/main/res/drawable/app_icon.xml
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="108dp"
-              android:height="108dp"
-              android:viewportWidth="108"
-              android:viewportHeight="108">
-              <path
-                  android:fillColor="#0F172A"
-                  android:pathData="M24,6 L84,6 C94,6 102,14 102,24 L102,84 C102,94 94,102 84,102 L24,102 C14,102 6,94 6,84 L6,24 C6,14 14,6 24,6 Z"/>
-              <path
-                  android:fillColor="#1E3A8A"
-                  android:pathData="M26,12 L82,12 C90,12 96,18 96,26 L96,82 C96,90 90,96 82,96 L26,96 C18,96 12,90 12,82 L12,26 C12,18 18,12 26,12 Z"/>
-              <path
-                  android:fillColor="#F59E0B"
-                  android:pathData="M26,12 L82,12 C90,12 96,18 96,26 L96,30 L12,30 L12,26 C12,18 18,12 26,12 Z"/>
-              <path
-                  android:fillColor="#FFFFFF"
-                  android:pathData="M28,44 L80,44 L80,48 L28,48 Z"/>
-              <path
-                  android:fillColor="#E2E8F0"
-                  android:pathData="M28,57 L80,57 L80,61 L28,61 Z"/>
-              <path
-                  android:fillColor="#E2E8F0"
-                  android:pathData="M42,70 L80,70 L80,74 L42,74 Z"/>
-              <path
-                  android:fillColor="#FBBF24"
-                  android:pathData="M24,82 L32,62 L44,74 L24,82 Z"/>
-              <path
-                  android:fillColor="#F59E0B"
-                  android:pathData="M32,62 L62,32 L74,44 L44,74 Z"/>
-              <path
-                  android:fillColor="#FDE68A"
-                  android:pathData="M62,32 L68,26 C70,24 73,24 75,26 L80,31 C82,33 82,36 80,38 L74,44 Z"/>
-          </vector>
-          EOF
-
-          cat << 'EOF' > app/src/main/res/drawable/ic_drag_handle.xml
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp" android:height="24dp"
-              android:viewportWidth="24" android:viewportHeight="24">
-              <path android:fillColor="#FFFFFFFF" android:pathData="M20,9H4v2h16V9zM4,15h16v-2H4V15z"/>
-          </vector>
-          EOF
-
-          cat << 'EOF' > app/src/main/res/drawable/ic_jump_vertical.xml
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp" android:height="24dp"
-              android:viewportWidth="24" android:viewportHeight="24">
-              <path android:fillColor="#FFFFFFFF" android:pathData="M8,11h3v10h2V11h3l-4,-4 -4,4zM4,3v2h16V3H4zM4,19v2h16v-2H4z"/>
-          </vector>
-          EOF
-
-          cat << 'EOF' > app/src/main/res/drawable/ic_auto_format.xml
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp" android:height="24dp"
-              android:viewportWidth="24" android:viewportHeight="24">
-              <path android:fillColor="#FFFFFFFF" android:pathData="M7.5,5.6L10,7 8.6,4.5 10,2 7.5,3.4 5,2l1.4,2.5L5,7zm12,9.8L17,14l1.4,2.5L17,19l2.5,-1.4L22,19l-1.4,-2.5L22,14zM22,2l-2.5,1.4L17,2l1.4,2.5L17,7l2.5,-1.4L22,7l-1.4,-2.5zm-7.63,5.29c-0.39,-0.39 -1.02,-0.39 -1.41,0L1.29,18.96c-0.39,0.39 -0.39,1.02 0,1.41l2.34,2.34c0.39,0.39 1.02,0.39 1.41,0L16.7,11.05c0.39,-0.39 0.39,-1.02 0,-1.41l-2.33,-2.35z"/>
-          </vector>
-          EOF
-
-          cat << 'EOF' > app/src/main/res/drawable/ic_undo.xml
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp" android:height="24dp"
-              android:viewportWidth="24" android:viewportHeight="24">
-              <path android:fillColor="#FFFFFFFF" android:pathData="M12.5,8c-2.65,0 -5.05,0.99 -6.9,2.6L2,7v9h9l-3.62,-3.62c1.39,-1.16 3.16,-1.88 5.12,-1.88 3.54,0 6.55,2.31 7.6,5.5l2.37,-0.78C21.08,11.03 17.15,8 12.5,8z"/>
-          </vector>
-          EOF
-
-          cat << 'EOF' > app/src/main/res/drawable/ic_redo.xml
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp" android:height="24dp"
-              android:viewportWidth="24" android:viewportHeight="24">
-              <path android:fillColor="#FFFFFFFF" android:pathData="M18.4,10.6C16.55,8.99 14.15,8 11.5,8c-4.65,0 -8.58,3.03 -9.96,7.22L3.9,16c1.05,-3.19 4.05,-5.5 7.6,-5.5 1.95,0 3.73,0.72 5.12,1.88L13,16h9V7l-3.6,3.6z"/>
-          </vector>
-          EOF
-
-          cat << 'EOF' > app/src/main/res/drawable/ic_copy.xml
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp" android:height="24dp"
-              android:viewportWidth="24" android:viewportHeight="24">
-              <path android:fillColor="#FFFFFFFF" android:pathData="M16,1H4c-1.1,0 -2,0.9 -2,2v14h2V3h12V1zm3,4H8c-1.1,0 -2,0.9 -2,2v14c0,1.1 0.9,2 2,2h11c1.1,0 2,-0.9 2,-2V7c0,-1.1 -0.9,-2 -2,-2zm0,16H8V7h11v14z"/>
-          </vector>
-          EOF
-
-          cat << 'EOF' > app/src/main/res/drawable/ic_paste.xml
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp" android:height="24dp"
-              android:viewportWidth="24" android:viewportHeight="24">
-              <path android:fillColor="#FFFFFFFF" android:pathData="M19,2h-4.18C14.4,0.84 13.3,0 12,0c-1.3,0 -2.4,0.84 -2.82,2H5c-1.1,0 -2,0.9 -2,2v16c0,1.1 0.9,2 2,2h14c1.1,0 2,-0.9 2,-2V4c0,-1.1 -0.9,-2 -2,-2zm-7,0c0.55,0 1,0.45 1,1s-0.45,1 -1,1 -1,-0.45 -1,-1 0.45,-1 1,-1zm7,18H5V4h2v3h10V4h2v16z"/>
-          </vector>
-          EOF
-
-          cat << 'EOF' > app/src/main/res/drawable/ic_select_all.xml
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp" android:height="24dp"
-              android:viewportWidth="24" android:viewportHeight="24">
-              <path android:fillColor="#FFFFFFFF" android:pathData="M3,5h2V3c-1.1,0 -2,0.9 -2,2zm0,8h2v-2H3v2zm4,8h2v-2H7v2zM3,9h2V7H3v2zm10,-6h-2v2h2V3zm6,0v2h2c0,-1.1 -0.9,-2 -2,-2zM5,21v-2H3c0,1.1 0.9,2 2,2zm-2,-4h2v-2H3v2zM9,3H7v2h2V3zm2,18h2v-2h-2v2zm8,-8h2v-2h-2v2zm0,8c1.1,0 2,-0.9 2,-2h-2v2zm0,-12h2V7h-2v2zm0,8h2v-2h-2v2zm-4,4h2v-2h-2v2zm0,-16h2V3h-2v2zM7,17h10V7H7v10zm2,-8h6v6H9V9z"/>
-          </vector>
-          EOF
-
-          cat << 'EOF' > app/src/main/res/drawable/ic_signature.xml
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp" android:height="24dp"
-              android:viewportWidth="24" android:viewportHeight="24">
-              <path android:fillColor="#FFFFFFFF" android:pathData="M3,17.25V21h3.75L17.81,9.94l-3.75,-3.75L3,17.25zM20.71,7.04c0.39,-0.39 0.39,-1.02 0,-1.41l-2.34,-2.34c-0.39,-0.39 -1.02,-0.39 -1.41,0l-1.83,1.83 3.75,3.75 1.83,-1.83z"/>
-          </vector>
-          EOF
-
-          cat << 'EOF' > app/src/main/res/drawable/ic_cut.xml
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp" android:height="24dp"
-              android:viewportWidth="24" android:viewportHeight="24">
-              <path android:fillColor="#FFFFFFFF" android:pathData="M9.64,7.64c0.23,-0.5 0.36,-1.05 0.36,-1.64 0,-2.21 -1.79,-4 -4,-4S2,3.79 2,6s1.79,4 4,4c0.59,0 1.14,-0.13 1.64,-0.36L10,12l-2.36,2.36C7.14,14.13 6.59,14 6,14c-2.21,0 -4,1.79 -4,4s1.79,4 4,4 4,-1.79 4,-4c0,-0.59 -0.13,-1.14 -0.36,-1.64L12,14l7,7h3v-1L9.64,7.64zM6,8c-1.1,0 -2,-0.89 -2,-2s0.9,-2 2,-2 2,0.89 2,2 -0.9,2 -2,2zm0,12c-1.1,0 -2,-0.89 -2,-2s0.9,-2 2,-2 2,0.89 2,2 -0.9,2 -2,2zm6,-7.5c-0.28,0 -0.5,-0.22 -0.5,-0.5s0.22,-0.5 0.5,-0.5 0.5,0.22 0.5,0.5 -0.22,0.5 -0.5,0.5zM19,3l-6,6 2,2 7,-7V3h-3z"/>
-          </vector>
-          EOF
-
-          cat << 'EOF' > app/src/main/res/drawable/ic_select_up.xml
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp" android:height="24dp"
-              android:viewportWidth="24" android:viewportHeight="24">
-              <path android:fillColor="#FFFFFFFF" android:pathData="M4,12l1.41,1.41L11,7.83V20h2V7.83l5.58,5.59L20,12l-8,-8 -8,8z"/>
-          </vector>
-          EOF
-
-          cat << 'EOF' > app/src/main/res/drawable/ic_select_down.xml
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp" android:height="24dp"
-              android:viewportWidth="24" android:viewportHeight="24">
-              <path android:fillColor="#FFFFFFFF" android:pathData="M20,12l-1.41,-1.41L13,16.17V4h-2v12.17l-5.58,-5.59L4,12l8,8 8,-8z"/>
-          </vector>
-          EOF
-
-          cat << 'EOF' > app/src/main/res/drawable/ic_datetime.xml
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp" android:height="24dp"
-              android:viewportWidth="24" android:viewportHeight="24">
-              <path android:fillColor="#FFFFFFFF" android:pathData="M11.99,2C6.47,2 2,6.48 2,12s4.47,10 9.99,10C17.52,22 22,17.52 22,12S17.52,2 11.99,2zM12,20c-4.42,0 -8,-3.58 -8,-8s3.58,-8 8,-8 8,3.58 8,8 -3.58,8 -8,8zm0.5,-13H11v6l5.25,3.15 0.75,-1.23 -4.5,-2.67z"/>
-          </vector>
-          EOF
-
-          cat << 'EOF' > app/src/main/res/drawable/ic_find_replace.xml
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp" android:height="24dp"
-              android:viewportWidth="24" android:viewportHeight="24">
-              <path android:fillColor="#FFFFFFFF" android:pathData="M15.5,14h-0.79l-0.28,-0.27C15.41,12.59 16,11.11 16,9.5 16,5.91 13.09,3 9.5,3S3,5.91 3,9.5 5.91,16 9.5,16c1.61,0 3.09,-0.59 4.23,-1.57l0.27,0.28v0.79l5,4.99L20.49,19l-4.99,-5zm-6,0C7.01,14 5,11.99 5,9.5S7.01,5 9.5,5 14,7.01 14,9.5 11.99,14 9.5,14z"/>
-          </vector>
-          EOF
-
-          cat << 'PYEOF' > gen_icons.py
-          import os, re
-          with open("app/src/main/java/com/mazwd/app/MainActivity.java", "r", encoding="utf-8") as f:
-              content = f.read()
-          names = set(re.findall(r'"(ic_[a-zA-Z0-9_]+)"', content))
-          fallback = (
-              '<vector xmlns:android="http://schemas.android.com/apk/res/android" '
-              'android:width="24dp" android:height="24dp" '
-              'android:viewportWidth="24" android:viewportHeight="24">'
-              '<path android:fillColor="#FFFFFFFF" android:pathData="M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2z"/>'
-              '</vector>'
-          )
-          for name in names:
-              p = f"app/src/main/res/drawable/{name}.xml"
-              if not os.path.exists(p):
-                  with open(p, "w", encoding="utf-8") as out:
-                      out.write(fallback)
-          PYEOF
-          python3 gen_icons.py
-          rm -f gen_icons.py
-
-      - name: Create AndroidManifest & Gradle Files
-        run: |
-          cat << 'EOF' > app/src/main/AndroidManifest.xml
-          <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <application
-                  android:allowBackup="true"
-                  android:icon="@drawable/app_icon"
-                  android:roundIcon="@drawable/app_icon"
-                  android:label="مفكرة مزود"
-                  android:supportsRtl="true"
-                  android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
-                  <activity
-                      android:name=".MainActivity"
-                      android:exported="true"
-                      android:configChanges="orientation|screenSize|keyboardHidden"
-                      android:windowSoftInputMode="adjustResize">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-                  </activity>
-              </application>
-          </manifest>
-          EOF
 
           cat << 'EOF' > settings.gradle
           pluginManagement {
@@ -587,8 +111,8 @@ jobs:
               }
 
               signingConfigs {
-                  debug {
-                      storeFile file("${System.getProperty('user.home')}/.android/mazwd_fixed.keystore")
+                  fixedConfig {
+                      storeFile file(System.getProperty("user.home") + "/.android/mazwd_fixed.keystore")
                       storePassword "mazwd123456"
                       keyAlias "mazwd_key"
                       keyPassword "mazwd123456"
@@ -597,26 +121,502 @@ jobs:
 
               buildTypes {
                   debug {
-                      signingConfig signingConfigs.debug
+                      signingConfig signingConfigs.fixedConfig
                   }
                   release {
-                      signingConfig signingConfigs.debug
                       minifyEnabled false
+                      signingConfig signingConfigs.fixedConfig
                   }
               }
 
               compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_17
-                  targetCompatibility JavaVersion.VERSION_17
+                  sourceCompatibility JavaVersion.VERSION_11
+                  targetCompatibility JavaVersion.VERSION_11
               }
+          }
+
+          dependencies {
           }
           EOF
 
-      - name: Build Signed APK with Gradle
-        uses: gradle/actions/setup-gradle@v3
-      - run: gradle assembleDebug
+      - name: Apply v2.7.1 Refinements to MainActivity.java
+        run: |
+          cat << 'PYEOF' > patch_app.py
+          import re
 
-      - name: Upload Ready APK Artifact
+          path = "app/src/main/java/com/mazwd/app/MainActivity.java"
+          with open(path, "r", encoding="utf-8") as f:
+              code = f.read()
+
+          # 1. Replace Turquoise Theme with Diamond Black
+          code = code.replace(
+              '{"التركواز الهادئ", "#115E59", "#042F2E", "#CCFBF1"}',
+              '{"الأسود الماسي", "#18181B", "#09090B", "#F4F4F5"}'
+          )
+
+          # 2. Rename Toolbar Customization Title & Button
+          code = code.replace("تخصيص وترتيب أدوات التحرير", "تخصيص أدوات التحرير")
+
+          # 3. Move Settings Switches to the Right of Option Text
+          old_sw = "row.addView(textCol);\n        row.addView(switchTrack, swLp);"
+          new_sw = "swLp.leftMargin = dp(12);\n        row.addView(switchTrack, 0, swLp);\n        row.addView(textCol);"
+          if old_sw in code:
+              code = code.replace(old_sw, new_sw)
+          else:
+              code = re.sub(
+                  r'row\.addView\(textCol\);\s*row\.addView\(switchTrack,\s*swLp\);',
+                  'swLp.leftMargin = dp(12);\n        row.addView(switchTrack, 0, swLp);\n        row.addView(textCol);',
+                  code
+              )
+
+          # 4. Hide Display Mode Segmented Row inside Toolbar Customization Dialog
+          code = code.replace(
+              "root.addView(modeCard);",
+              "modeCard.setVisibility(View.GONE);\n        root.addView(modeCard);"
+          )
+
+          # 5. Add Confirmation Dialog when Resetting Toolbar to Default
+          if "showResetToolbarConfirmDialog(v)" not in code:
+              code = code.replace(
+                  "currentOrder.clear();",
+                  "if (!isResetToolbarConfirmed) { showResetToolbarConfirmDialog(v); return; } isResetToolbarConfirmed = false; currentOrder.clear();",
+                  1
+              )
+
+          # 6. Fix Font Dropdown Item Padding for Arabic "ي" Dots
+          code = code.replace(
+              "item.setTypeface(getAppTypeface(i, true));",
+              "item.setTypeface(getAppTypeface(i, true));\n            item.setIncludeFontPadding(i != 3);"
+          )
+
+          # 7. Fix 1mm Bottom Clipping on Dialog Buttons + Move Reset Button to Top
+          if "prepareDialogViewHierarchy(rootView);" not in code:
+              code = code.replace(
+                  "AlertDialog dialog = builder.create();",
+                  "prepareDialogViewHierarchy(rootView);\n        AlertDialog dialog = builder.create();"
+              )
+
+          # 8. Unclip Pure Arabic Text Labels on Screen Refresh
+          if "applyUnclippedArabicTextLabels(rootContainer);" not in code:
+              code = code.replace(
+                  "applyFontRecursively(rootContainer);",
+                  "applyFontRecursively(rootContainer);\n        applyUnclippedArabicTextLabels(rootContainer);"
+              )
+
+          # 9. Create .nomedia Inside Safe Vault Directory
+          if "ensureNoMediaInSafeVault(vaultDirUri);" not in code:
+              code = code.replace(
+                  "return vaultDirUri;",
+                  "ensureNoMediaInSafeVault(vaultDirUri);\n            return vaultDirUri;"
+              )
+
+          # 10. Append All Required Helper Fields & Methods Before Final Closing Brace
+          blocks_to_append = []
+
+          if "boolean isResetToolbarConfirmed" not in code:
+              blocks_to_append.extend([
+                  "    private boolean isResetToolbarConfirmed = false;",
+                  ""
+              ])
+
+          if "void showResetToolbarConfirmDialog(" not in code:
+              blocks_to_append.extend([
+                  "    private void showResetToolbarConfirmDialog(final View resetBtn) {",
+                  "        LinearLayout root = createDialogRoot();",
+                  "        root.addView(createDialogTitle(\"استعادة الإعدادات الافتراضية\"));",
+                  "        root.addView(createDialogMessage(\"هل أنت متأكد أنك تريد استعادة الإعدادات الافتراضية؟\"));",
+                  "        LinearLayout actions = createDialogActionsRow();",
+                  "        Button yesBtn = createPrimaryButton(\"نعم\", getPrimaryColor(), Color.WHITE);",
+                  "        Button noBtn = createSecondaryButton(\"لا\");",
+                  "        LinearLayout.LayoutParams lp1 = new LinearLayout.LayoutParams(0, dp(42), 1f);",
+                  "        lp1.leftMargin = dp(8);",
+                  "        yesBtn.setLayoutParams(lp1);",
+                  "        LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(0, dp(42), 1f);",
+                  "        noBtn.setLayoutParams(lp2);",
+                  "        actions.addView(yesBtn);",
+                  "        actions.addView(noBtn);",
+                  "        root.addView(actions);",
+                  "        final AlertDialog confirmDialog = showStyledDialog(root);",
+                  "        yesBtn.setOnClickListener(v -> {",
+                  "            confirmDialog.dismiss();",
+                  "            isResetToolbarConfirmed = true;",
+                  "            if (resetBtn != null) resetBtn.performClick();",
+                  "        });",
+                  "        noBtn.setOnClickListener(v -> confirmDialog.dismiss());",
+                  "    }",
+                  ""
+              ])
+
+          if "void prepareDialogViewHierarchy(" not in code:
+              blocks_to_append.extend([
+                  "    private void prepareDialogViewHierarchy(View rootView) {",
+                  "        if (rootView == null) return;",
+                  "        rootView.setPadding(",
+                  "            rootView.getPaddingLeft(),",
+                  "            rootView.getPaddingTop(),",
+                  "            rootView.getPaddingRight(),",
+                  "            rootView.getPaddingBottom() + dp(4)",
+                  "        );",
+                  "        fixDialogButtonsAndResetLayout(rootView);",
+                  "        applyUnclippedArabicTextLabels(rootView);",
+                  "    }",
+                  "",
+                  "    private void fixDialogButtonsAndResetLayout(View view) {",
+                  "        if (view == null) return;",
+                  "        if (view instanceof ViewGroup) {",
+                  "            ViewGroup vg = (ViewGroup) view;",
+                  "            vg.setClipChildren(false);",
+                  "            vg.setClipToPadding(false);",
+                  "            Button foundResetBtn = null;",
+                  "            ViewGroup actionsRow = null;",
+                  "            for (int i = 0; i < vg.getChildCount(); i++) {",
+                  "                View child = vg.getChildAt(i);",
+                  "                if (child instanceof Button) {",
+                  "                    Button b = (Button) child;",
+                  "                    if (b.getLayoutParams() instanceof ViewGroup.MarginLayoutParams) {",
+                  "                        ViewGroup.MarginLayoutParams mlp = (ViewGroup.MarginLayoutParams) b.getLayoutParams();",
+                  "                        if (mlp.bottomMargin < dp(3)) mlp.bottomMargin = dp(3);",
+                  "                        if (mlp.topMargin < dp(1)) mlp.topMargin = dp(1);",
+                  "                        b.setLayoutParams(mlp);",
+                  "                    }",
+                  "                    if (\"استعادة الافتراضي\".equals(String.valueOf(b.getText()).trim())) {",
+                  "                        foundResetBtn = b;",
+                  "                        actionsRow = vg;",
+                  "                    }",
+                  "                } else {",
+                  "                    fixDialogButtonsAndResetLayout(child);",
+                  "                }",
+                  "            }",
+                  "            if (foundResetBtn != null && actionsRow != null && actionsRow.getParent() instanceof LinearLayout) {",
+                  "                LinearLayout dialogRoot = (LinearLayout) actionsRow.getParent();",
+                  "                actionsRow.removeView(foundResetBtn);",
+                  "                for (int j = 0; j < actionsRow.getChildCount(); j++) {",
+                  "                    View rem = actionsRow.getChildAt(j);",
+                  "                    if (rem instanceof Button && \"حفظ\".equals(String.valueOf(((Button) rem).getText()).trim())) {",
+                  "                        if (rem.getLayoutParams() instanceof LinearLayout.LayoutParams) {",
+                  "                            LinearLayout.LayoutParams slp = (LinearLayout.LayoutParams) rem.getLayoutParams();",
+                  "                            slp.rightMargin = 0;",
+                  "                            rem.setLayoutParams(slp);",
+                  "                        }",
+                  "                    }",
+                  "                }",
+                  "                LinearLayout.LayoutParams topLp = new LinearLayout.LayoutParams(",
+                  "                    ViewGroup.LayoutParams.MATCH_PARENT, dp(40)",
+                  "                );",
+                  "                topLp.bottomMargin = dp(10);",
+                  "                foundResetBtn.setLayoutParams(topLp);",
+                  "                int insertIdx = Math.min(2, dialogRoot.getChildCount());",
+                  "                dialogRoot.addView(foundResetBtn, insertIdx);",
+                  "            }",
+                  "        }",
+                  "    }",
+                  ""
+              ])
+
+          if "void applyUnclippedArabicTextLabels(" not in code:
+              blocks_to_append.extend([
+                  "    private void applyUnclippedArabicTextLabels(View view) {",
+                  "        if (view == null) return;",
+                  "        if (view.getClass() == TextView.class && view != readTextView && view.getBackground() == null) {",
+                  "            ((TextView) view).setIncludeFontPadding(getSelectedFontIndex() != 3);",
+                  "        }",
+                  "        if (view instanceof ViewGroup) {",
+                  "            ViewGroup vg = (ViewGroup) view;",
+                  "            for (int i = 0; i < vg.getChildCount(); i++) {",
+                  "                applyUnclippedArabicTextLabels(vg.getChildAt(i));",
+                  "            }",
+                  "        }",
+                  "    }",
+                  ""
+              ])
+
+          if "void ensureNoMediaInSafeVault(" not in code:
+              blocks_to_append.extend([
+                  "    private void ensureNoMediaInSafeVault(Uri vaultDirUri) {",
+                  "        if (vaultDirUri == null || folderTreeUri == null) return;",
+                  "        try {",
+                  "            String vaultDocId = DocumentsContract.getDocumentId(vaultDirUri);",
+                  "            Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(folderTreeUri, vaultDocId);",
+                  "            try (Cursor c = getContentResolver().query(",
+                  "                    childrenUri,",
+                  "                    new String[]{DocumentsContract.Document.COLUMN_DISPLAY_NAME},",
+                  "                    null, null, null)) {",
+                  "                if (c != null) {",
+                  "                    while (c.moveToNext()) {",
+                  "                        if (\".nomedia\".equals(c.getString(0))) return;",
+                  "                    }",
+                  "                }",
+                  "            }",
+                  "            DocumentsContract.createDocument(getContentResolver(), vaultDirUri, \"application/octet-stream\", \".nomedia\");",
+                  "        } catch (Exception ignored) {}",
+                  "    }",
+                  ""
+              ])
+
+          if "void onWindowFocusChanged(" not in code:
+              blocks_to_append.extend([
+                  "    @Override",
+                  "    public void onWindowFocusChanged(boolean hasFocus) {",
+                  "        super.onWindowFocusChanged(hasFocus);",
+                  "        if (!hasFocus && currentScreen == ScreenState.EDIT) {",
+                  "            saveHandler.removeCallbacks(autoSaveRunnable);",
+                  "            saveCurrentFileImmediately(false);",
+                  "        }",
+                  "    }",
+                  ""
+              ])
+
+          if "void onStop(" not in code:
+              blocks_to_append.extend([
+                  "    @Override",
+                  "    protected void onStop() {",
+                  "        if (currentScreen == ScreenState.EDIT) {",
+                  "            saveHandler.removeCallbacks(autoSaveRunnable);",
+                  "            saveCurrentFileImmediately(false);",
+                  "        }",
+                  "        super.onStop();",
+                  "    }",
+                  ""
+              ])
+
+          if blocks_to_append:
+              last_brace = code.rfind("}")
+              if last_brace != -1:
+                  code = code[:last_brace] + "\n" + "\n".join(blocks_to_append) + "\n}\n"
+
+          with open(path, "w", encoding="utf-8") as f:
+              f.write(code)
+          print("Successfully patched MainActivity.java for v2.7.1")
+          PYEOF
+          python3 patch_app.py
+          rm patch_app.py
+
+      - name: Download Arabic Fonts
+        run: |
+          curl -f -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/almarai/Almarai-Regular.ttf" -o app/src/main/res/font/mazwd_arabic.ttf
+          curl -f -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/almarai/Almarai-Bold.ttf" -o app/src/main/res/font/mazwd_arabic_bold.ttf
+          curl -f -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/arefruqaa/ArefRuqaa-Regular.ttf" -o app/src/main/res/font/aref_ruqaa.ttf
+          curl -f -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/arefruqaa/ArefRuqaa-Bold.ttf" -o app/src/main/res/font/aref_ruqaa_bold.ttf
+          curl -f -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/tajawal/Tajawal-Regular.ttf" -o app/src/main/res/font/tajawal_regular.ttf
+          curl -f -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/tajawal/Tajawal-Bold.ttf" -o app/src/main/res/font/tajawal_bold.ttf
+          curl -f -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/reemkufi/ReemKufi%5Bwght%5D.ttf" -o app/src/main/res/font/reem_kufi.ttf
+          cp app/src/main/res/font/reem_kufi.ttf app/src/main/res/font/reem_kufi_bold.ttf
+          curl -f -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/scheherazadenew/ScheherazadeNew-Bold.ttf" -o app/src/main/res/font/scheherazade_bold.ttf
+          curl -f -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/readexpro/ReadexPro%5BHEXP%2Cwght%5D.ttf" -o app/src/main/res/font/readex_pro.ttf
+          cp app/src/main/res/font/readex_pro.ttf app/src/main/res/font/readex_pro_bold.ttf
+          curl -f -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansarabic/NotoSansArabic%5Bwdth%2Cwght%5D.ttf" -o app/src/main/res/font/noto_sans_arabic.ttf
+          cp app/src/main/res/font/noto_sans_arabic.ttf app/src/main/res/font/noto_sans_arabic_bold.ttf
+          curl -f -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/notonaskharabic/NotoNaskhArabic%5Bwght%5D.ttf" -o app/src/main/res/font/noto_naskh_arabic.ttf
+          cp app/src/main/res/font/noto_naskh_arabic.ttf app/src/main/res/font/noto_naskh_arabic_bold.ttf
+          curl -f -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic/IBMPlexSansArabic-Regular.ttf" -o app/src/main/res/font/ibm_plex_arabic.ttf
+          curl -f -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsansarabic/IBMPlexSansArabic-Bold.ttf" -o app/src/main/res/font/ibm_plex_arabic_bold.ttf
+
+      - name: Create Vector Drawables, App Icon & Manifest
+        run: |
+          cat << 'EOF' > app/src/main/res/drawable/app_icon.xml
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path
+                  android:fillColor="#0F172A"
+                  android:pathData="M0,0h108v108h-108z"/>
+              <path
+                  android:fillColor="#1E3A8A"
+                  android:pathData="M12,12 L96,12 A14,14 0 0,1 102,26 L102,96 A14,14 0 0,1 88,102 L20,102 A14,14 0 0,1 6,88 L6,26 A14,14 0 0,1 12,12 Z"/>
+              <path
+                  android:fillColor="#FFFFFF"
+                  android:pathData="M24,18 L76,18 A6,6 0 0,1 82,24 L82,84 A6,6 0 0,1 76,90 L24,90 A6,6 0 0,1 18,84 L18,24 A6,6 0 0,1 24,18 Z"/>
+              <path
+                  android:fillColor="#F59E0B"
+                  android:pathData="M73,18 L79,18 A3,3 0 0,1 82,21 L82,87 A3,3 0 0,1 79,90 L73,90 Z"/>
+              <path
+                  android:fillColor="#1E3A8A"
+                  android:pathData="M28,33 L66,33 L66,37 L28,37 Z"/>
+              <path
+                  android:fillColor="#475569"
+                  android:pathData="M28,45 L66,45 L66,48.5 L28,48.5 Z"/>
+              <path
+                  android:fillColor="#475569"
+                  android:pathData="M28,56 L66,56 L66,59.5 L28,59.5 Z"/>
+              <path
+                  android:fillColor="#475569"
+                  android:pathData="M40,67 L66,67 L66,70.5 L40,70.5 Z"/>
+              <path
+                  android:fillColor="#F59E0B"
+                  android:pathData="M22,78 L36,64 L44,72 L30,86 L20,88 Z"/>
+              <path
+                  android:fillColor="#FBBF24"
+                  android:pathData="M36,64 L56,44 L64,52 L44,72 Z"/>
+              <path
+                  android:fillColor="#FDE68A"
+                  android:pathData="M20,88 L25,85 L23,83 Z"/>
+          </vector>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/drawable/ic_undo.xml
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="#FFFFFFFF"
+                  android:pathData="M12.5,8c-2.65,0 -5.05,0.99 -6.9,2.6L2,7v9h9l-3.62,-3.62c1.39,-1.16 3.16,-1.88 5.12,-1.88 3.54,0 6.55,2.31 7.6,5.5l2.37,-0.78C21.08,11.03 17.15,8 12.5,8z"/>
+          </vector>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/drawable/ic_redo.xml
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="#FFFFFFFF"
+                  android:pathData="M18.4,10.6C16.55,8.99 14.15,8 11.5,8c-4.65,0 -8.58,3.03 -9.96,7.22L3.9,16c1.05,-3.19 4.05,-5.5 7.6,-5.5 1.95,0 3.73,0.72 5.12,1.88L13,16h9V7l-3.6,3.6z"/>
+          </vector>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/drawable/ic_copy.xml
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="#FFFFFFFF"
+                  android:pathData="M16,1H4C2.9,1 2,1.9 2,3v14h2V3h12V1zm3,4H8C6.9,5 6,5.9 6,7v14c0,1.1 0.9,2 2,2h11c1.1,0 2,-0.9 2,-2V7C21,5.9 20.1,5 19,5zm0,16H8V7h11V21z"/>
+          </vector>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/drawable/ic_cut.xml
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="#FFFFFFFF"
+                  android:pathData="M9.64,7.64c0.23,-0.5 0.36,-1.05 0.36,-1.64 0,-2.21 -1.79,-4 -4,-4S2,3.79 2,6s1.79,4 4,4c0.59,0 1.14,-0.13 1.64,-0.36L10,12l-2.36,2.36C7.14,14.13 6.59,14 6,14c-2.21,0 -4,1.79 -4,4s1.79,4 4,4 4,-1.79 4,-4c0,-0.59 -0.13,-1.14 -0.36,-1.64L12,14l7,7h3v-1L9.64,7.64zM6,8C4.9,8 4,7.11 4,6s0.9,-2 2,-2 2,0.89 2,2 -0.9,2 -2,2zm0,12c-1.1,0 -2,-0.89 -2,-2s0.9,-2 2,-2 2,0.89 2,2 -0.9,2 -2,2zm6,-7.5c-0.28,0 -0.5,-0.22 -0.5,-0.5s0.22,-0.5 0.5,-0.5 0.5,0.22 0.5,0.5 -0.22,0.5 -0.5,0.5zM19,3l-6,6 2,2 7,-7V3h-3z"/>
+          </vector>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/drawable/ic_paste.xml
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="#FFFFFFFF"
+                  android:pathData="M19,2h-4.18C14.4,0.84 13.3,0 12,0c-1.3,0 -2.4,0.84 -2.82,2H5C3.9,2 3,2.9 3,4v16c0,1.1 0.9,2 2,2h14c1.1,0 2,-0.9 2,-2V4C21,2.9 20.1,2 19,2zm-7,0c0.55,0 1,0.45 1,1s-0.45,1 -1,1 -1,-0.45 -1,-1 0.45,-1 1,-1zm7,18H5V4h2v3h10V4h2v16z"/>
+          </vector>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/drawable/ic_select_all.xml
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="#FFFFFFFF"
+                  android:pathData="M3,5h2V3c-1.1,0 -2,0.9 -2,2zm0,8h2v-2H3v2zm4,8h2v-2H7v2zM3,9h2V7H3v2zm10,-6h-2v2h2V3zm6,0v2h2c0,-1.1 -0.9,-2 -2,-2zM5,21v-2H3c0,1.1 0.9,2 2,2zm-2,-4h2v-2H3v2zM9,3H7v2h2V3zm2,18h2v-2h-2v2zm8,-8h2v-2h-2v2zm0,8c1.1,0 2,-0.9 2,-2h-2v2zm0,-12h2V7h-2v2zm0,8h2v-2h-2v2zm-4,4h2v-2h-2v2zm0,-16h2V3h-2v2zM7,17h10V7H7v10zm2,-8h6v6H9V9z"/>
+          </vector>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/drawable/ic_select_up.xml
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="#FFFFFFFF"
+                  android:pathData="M4,3h16v2.5H4V3z M12,7l-6,6h4v8h4v-8h4L12,7z"/>
+          </vector>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/drawable/ic_select_down.xml
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="#FFFFFFFF"
+                  android:pathData="M12,17l6,-6h-4V3h-4v8H6L12,17z M4,18.5h16V21H4V18.5z"/>
+          </vector>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/drawable/ic_auto_format.xml
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="#FFFFFFFF"
+                  android:pathData="M7.5,5.6L10,7L8.6,4.5L10,2L7.5,3.4L5,2L6.4,4.5L5,7L7.5,5.6zM19.5,15.4L17,14l1.4,2.5L17,19l2.5,-1.4L22,19l-1.4,-2.5L22,14L19.5,15.4zM22,2l-2.5,1.4L17,2l1.4,2.5L17,7l2.5,-1.4L22,7l-1.4,-2.5L22,2zM14.37,7.29c-0.39,-0.39 -1.02,-0.39 -1.41,0L1.29,18.96c-0.39,0.39 -0.39,1.02 0,1.41l2.34,2.34c0.39,0.39 1.02,0.39 1.41,0L16.7,11.05c0.39,-0.39 0.39,-1.02 0,-1.41L14.37,7.29zM13.34,12.78l-2.12,-2.12l2.44,-2.44l2.12,2.12L13.34,12.78z"/>
+          </vector>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/drawable/ic_signature.xml
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="#FFFFFFFF"
+                  android:pathData="M3,17.25V21h3.75L17.81,9.94l-3.75,-3.75L3,17.25zM20.71,7.04c0.39,-0.39 0.39,-1.02 0,-1.41l-2.34,-2.34c-0.39,-0.39 -1.02,-0.39 -1.41,0l-1.83,1.83 3.75,3.75 1.83,-1.83z"/>
+          </vector>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/drawable/ic_datetime.xml
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="#FFFFFFFF"
+                  android:pathData="M19,3h-1V1h-2v2H8V1H6v2H5C3.89,3 3,3.9 3,5v14c0,1.1 0.89,2 2,2h14c1.1,0 2,-0.9 2,-2V5C21,3.9 20.1,3 19,3zm0,16H5V8h14V19zM7,10h5v5H7V10z"/>
+          </vector>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/drawable/ic_find_replace.xml
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="#FFFFFFFF"
+                  android:pathData="M15.5,14h-0.79l-0.28,-0.27C15.41,12.59 16,11.11 16,9.5 16,5.91 13.09,3 9.5,3S3,5.91 3,9.5 5.91,16 9.5,16c1.61,0 3.09,-0.59 4.23,-1.57l0.27,0.28v0.79l5,4.99L20.49,19l-4.99,-5zm-6,0C7.01,14 5,11.99 5,9.5S7.01,5 9.5,5 14,7.01 14,9.5 11.99,14 9.5,14z"/>
+          </vector>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/drawable/ic_jump_vertical.xml
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="#FFFFFFFF"
+                  android:pathData="M16,17.01V10h-2v7.01h-3L15,21l4,-3.99h-3zM9,3L5,6.99h3V14h2V6.99h3L9,3z"/>
+          </vector>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/values/styles.xml
+          <resources>
+              <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">
+                  <item name="android:colorPrimary">#0F172A</item>
+                  <item name="android:colorPrimaryDark">#090D16</item>
+                  <item name="android:colorAccent">#2563EB</item>
+                  <item name="android:statusBarColor">#090D16</item>
+                  <item name="android:navigationBarColor">#F1F5F9</item>
+              </style>
+          </resources>
+          EOF
+
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <application
+                  android:allowBackup="true"
+                  android:icon="@drawable/app_icon"
+                  android:roundIcon="@drawable/app_icon"
+                  android:label="مفكرة مزود"
+                  android:supportsRtl="true"
+                  android:theme="@style/AppTheme">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:configChanges="orientation|screenSize|keyboardHidden"
+                      android:windowSoftInputMode="adjustResize|stateHidden">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+              </application>
+
+          </manifest>
+          EOF
+
+      - name: Build Signed Debug APK
+        run: |
+          gradle assembleDebug
+
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: مفكرة-مزود-APK
