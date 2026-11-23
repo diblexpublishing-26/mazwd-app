@@ -174,6 +174,10 @@ jobs:
               "root.addView(modeCard);",
               "modeCard.setVisibility(View.GONE);\n        root.addView(modeCard);"
           )
+          code = code.replace(
+              "        root.addView(modeRow);\n",
+              "        modeRow.setVisibility(View.GONE);\n"
+          )
 
           # 5. Add Confirmation Dialog when Resetting Toolbar to Default
           if "showResetToolbarConfirmDialog(v)" not in code:
@@ -188,29 +192,41 @@ jobs:
               "item.setTypeface(getAppTypeface(i, true));",
               "item.setTypeface(getAppTypeface(i, true));\n            item.setIncludeFontPadding(i != 3);"
           )
+          code = code.replace(
+              "tv.setText(FONT_NAMES[i]);",
+              "tv.setText(FONT_NAMES[i]);\n            tv.setIncludeFontPadding(idx != 3);"
+          )
 
-          # 7. Fix 1mm Bottom Clipping on Dialog Buttons + Move Reset Button to Top
-          if "prepareDialogViewHierarchy(rootView);" not in code:
-              code = code.replace(
-                  "AlertDialog dialog = builder.create();",
-                  "prepareDialogViewHierarchy(rootView);\n        AlertDialog dialog = builder.create();"
+          # 7. Hook Dialog Button Unclipping & Reset Button Top Placement into showStyledDialog
+          if "prepareDialogViewHierarchy(" not in code:
+              code = re.sub(
+                  r'(void\s+showStyledDialog\s*\(\s*Dialog\s+\w+\s*,\s*View\s+(\w+)\s*,\s*float\s+\w+\s*,\s*int\s+\w+\s*\)\s*\{)',
+                  r'\1\n        prepareDialogViewHierarchy(\2);',
+                  code,
+                  count=1
               )
 
           # 8. Unclip Pure Arabic Text Labels on Screen Refresh
           if "applyUnclippedArabicTextLabels(rootContainer);" not in code:
-              code = code.replace(
-                  "applyFontRecursively(rootContainer);",
-                  "applyFontRecursively(rootContainer);\n        applyUnclippedArabicTextLabels(rootContainer);"
-              )
+              if "applyFontRecursively(rootContainer);" in code:
+                  code = code.replace(
+                      "applyFontRecursively(rootContainer);",
+                      "applyFontRecursively(rootContainer);\n        applyUnclippedArabicTextLabels(rootContainer);"
+                  )
+              elif "applyThemeColors(rootContainer);" in code:
+                  code = code.replace(
+                      "applyThemeColors(rootContainer);",
+                      "applyThemeColors(rootContainer);\n        applyUnclippedArabicTextLabels(rootContainer);"
+                  )
 
           # 9. Create .nomedia Inside Safe Vault Directory
           if "ensureNoMediaInSafeVault(vaultDirUri);" not in code:
               code = code.replace(
-                  "return vaultDirUri;",
-                  "ensureNoMediaInSafeVault(vaultDirUri);\n            return vaultDirUri;"
+                  "if (vaultDirUri == null) return false;",
+                  "if (vaultDirUri == null) return false;\n            ensureNoMediaInSafeVault(vaultDirUri);"
               )
 
-          # 10. Append All Required Helper Fields & Methods Before Final Closing Brace
+          # 10. Append Self-Contained Helper Methods Before Final Closing Brace
           blocks_to_append = []
 
           if "boolean isResetToolbarConfirmed" not in code:
@@ -222,27 +238,72 @@ jobs:
           if "void showResetToolbarConfirmDialog(" not in code:
               blocks_to_append.extend([
                   "    private void showResetToolbarConfirmDialog(final View resetBtn) {",
-                  "        LinearLayout root = createDialogRoot();",
-                  "        root.addView(createDialogTitle(\"استعادة الإعدادات الافتراضية\"));",
-                  "        root.addView(createDialogMessage(\"هل أنت متأكد أنك تريد استعادة الإعدادات الافتراضية؟\"));",
-                  "        LinearLayout actions = createDialogActionsRow();",
-                  "        Button yesBtn = createPrimaryButton(\"نعم\", getPrimaryColor(), Color.WHITE);",
-                  "        Button noBtn = createSecondaryButton(\"لا\");",
+                  "        final Dialog confirmDialog = new Dialog(this);",
+                  "        LinearLayout root = new LinearLayout(this);",
+                  "        root.setOrientation(LinearLayout.VERTICAL);",
+                  "        root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);",
+                  "        root.setPadding(dp(20), dp(20), dp(20), dp(20));",
+                  "        GradientDrawable bg = new GradientDrawable();",
+                  "        bg.setColor(Color.WHITE);",
+                  "        bg.setCornerRadius(dp(18));",
+                  "        root.setBackground(bg);",
+                  "        TextView titleTv = new TextView(this);",
+                  "        titleTv.setText(\"استعادة الإعدادات الافتراضية\");",
+                  "        titleTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);",
+                  "        titleTv.setTextColor(Color.parseColor(\"#0F172A\"));",
+                  "        titleTv.setGravity(Gravity.CENTER);",
+                  "        LinearLayout.LayoutParams tLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);",
+                  "        tLp.bottomMargin = dp(10);",
+                  "        root.addView(titleTv, tLp);",
+                  "        TextView msgTv = new TextView(this);",
+                  "        msgTv.setText(\"هل أنت متأكد أنك تريد استعادة الإعدادات الافتراضية؟\");",
+                  "        msgTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);",
+                  "        msgTv.setTextColor(Color.parseColor(\"#475569\"));",
+                  "        msgTv.setGravity(Gravity.CENTER);",
+                  "        LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);",
+                  "        mLp.bottomMargin = dp(18);",
+                  "        root.addView(msgTv, mLp);",
+                  "        LinearLayout actions = new LinearLayout(this);",
+                  "        actions.setOrientation(LinearLayout.HORIZONTAL);",
+                  "        actions.setGravity(Gravity.CENTER);",
+                  "        Button yesBtn = new Button(this);",
+                  "        yesBtn.setText(\"نعم\");",
+                  "        yesBtn.setAllCaps(false);",
+                  "        yesBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);",
+                  "        yesBtn.setTextColor(Color.WHITE);",
+                  "        GradientDrawable yesBg = new GradientDrawable();",
+                  "        yesBg.setColor(getPrimaryColor());",
+                  "        yesBg.setCornerRadius(dp(10));",
+                  "        yesBtn.setBackground(yesBg);",
                   "        LinearLayout.LayoutParams lp1 = new LinearLayout.LayoutParams(0, dp(42), 1f);",
                   "        lp1.leftMargin = dp(8);",
+                  "        lp1.topMargin = dp(2);",
+                  "        lp1.bottomMargin = dp(3);",
                   "        yesBtn.setLayoutParams(lp1);",
+                  "        Button noBtn = new Button(this);",
+                  "        noBtn.setText(\"لا\");",
+                  "        noBtn.setAllCaps(false);",
+                  "        noBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);",
+                  "        noBtn.setTextColor(Color.parseColor(\"#1E293B\"));",
+                  "        GradientDrawable noBg = new GradientDrawable();",
+                  "        noBg.setColor(Color.parseColor(\"#E2E8F0\"));",
+                  "        noBg.setCornerRadius(dp(10));",
+                  "        noBtn.setBackground(noBg);",
                   "        LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(0, dp(42), 1f);",
+                  "        lp2.topMargin = dp(2);",
+                  "        lp2.bottomMargin = dp(3);",
                   "        noBtn.setLayoutParams(lp2);",
                   "        actions.addView(yesBtn);",
                   "        actions.addView(noBtn);",
                   "        root.addView(actions);",
-                  "        final AlertDialog confirmDialog = showStyledDialog(root);",
                   "        yesBtn.setOnClickListener(v -> {",
                   "            confirmDialog.dismiss();",
                   "            isResetToolbarConfirmed = true;",
                   "            if (resetBtn != null) resetBtn.performClick();",
                   "        });",
                   "        noBtn.setOnClickListener(v -> confirmDialog.dismiss());",
+                  "        applyThemeColors(root);",
+                  "        showStyledDialog(confirmDialog, root, 0.88f, 380);",
                   "    }",
                   ""
               ])
@@ -304,6 +365,7 @@ jobs:
                   "                    ViewGroup.LayoutParams.MATCH_PARENT, dp(40)",
                   "                );",
                   "                topLp.bottomMargin = dp(10);",
+                  "                topLp.topMargin = dp(2);",
                   "                foundResetBtn.setLayoutParams(topLp);",
                   "                int insertIdx = Math.min(2, dialogRoot.getChildCount());",
                   "                dialogRoot.addView(foundResetBtn, insertIdx);",
@@ -333,10 +395,10 @@ jobs:
           if "void ensureNoMediaInSafeVault(" not in code:
               blocks_to_append.extend([
                   "    private void ensureNoMediaInSafeVault(Uri vaultDirUri) {",
-                  "        if (vaultDirUri == null || folderTreeUri == null) return;",
+                  "        if (vaultDirUri == null) return;",
                   "        try {",
                   "            String vaultDocId = DocumentsContract.getDocumentId(vaultDirUri);",
-                  "            Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(folderTreeUri, vaultDocId);",
+                  "            Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(vaultDirUri, vaultDocId);",
                   "            try (Cursor c = getContentResolver().query(",
                   "                    childrenUri,",
                   "                    new String[]{DocumentsContract.Document.COLUMN_DISPLAY_NAME},",
