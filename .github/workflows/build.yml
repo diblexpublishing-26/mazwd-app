@@ -60,7 +60,7 @@ jobs:
           fi
           sed -i '/^\x60/d' app/src/main/java/com/mazwd/app/MainActivity.java
 
-          python3 - << 'EOF'
+          cat << 'PYEOF' > patch_app.py
           import re
 
           path = "app/src/main/java/com/mazwd/app/MainActivity.java"
@@ -75,9 +75,11 @@ jobs:
 
           # 2. Move sliding switches in Settings to the RIGHT of the text (index 0 in RTL row)
           old_switch_add = "row.addView(switchTrack, new LinearLayout.LayoutParams(dp(48), dp(26)));"
-          new_switch_add = """LinearLayout.LayoutParams swLp = new LinearLayout.LayoutParams(dp(48), dp(26));
-                  swLp.leftMargin = dp(12);
-                  row.addView(switchTrack, 0, swLp);"""
+          new_switch_add = (
+              "LinearLayout.LayoutParams swLp = new LinearLayout.LayoutParams(dp(48), dp(26));\n"
+              "        swLp.leftMargin = dp(12);\n"
+              "        row.addView(switchTrack, 0, swLp);"
+          )
           if old_switch_add in code:
               code = code.replace(old_switch_add, new_switch_add, 1)
 
@@ -95,199 +97,27 @@ jobs:
 
           # 6. Create .nomedia inside Safe Vault so snapshots don't clutter Recent Files
           old_snap_call = "Uri vaultDirUri = getOrCreateSafeVaultDirectoryUri(true);"
-          new_snap_call = """Uri vaultDirUri = getOrCreateSafeVaultDirectoryUri(true);
-                      ensureNoMediaInSafeVault(vaultDirUri);"""
+          new_snap_call = (
+              "Uri vaultDirUri = getOrCreateSafeVaultDirectoryUri(true);\n"
+              "            ensureNoMediaInSafeVault(vaultDirUri);"
+          )
           if old_snap_call in code and "ensureNoMediaInSafeVault" not in code:
               code = code.replace(old_snap_call, new_snap_call, 1)
 
-          # 7. Enhance showStyledDialog:
-          #    - Fix 1mm bottom clipping on all dialog buttons
-          #    - Fix "ي" dots on pure text labels (excluding Scheherazade idx==3, buttons, badges, and reader)
-          #    - Move "استعادة الافتراضي" to top of Toolbar Customization dialog + add confirmation dialog
-          old_styled_dialog = """    private void showStyledDialog(Dialog dialog, View rootView, float widthFraction, int heightSpec) {
-                  dialog.setContentView(rootView);"""
-          old_styled_dialog_alt = """    private void showStyledDialog(Dialog dialog, View rootView, float widthFraction, int heightSpec) {\n        dialog.setContentView(rootView);"""
+          # 7. Enhance showStyledDialog & Home labels
+          old_styled_dialog = "    private void showStyledDialog(Dialog dialog, View rootView, float widthFraction, int heightSpec) {\n        dialog.setContentView(rootView);"
+          new_styled_dialog = (
+              "    private void showStyledDialog(Dialog dialog, View rootView, float widthFraction, int heightSpec) {\n"
+              "        prepareDialogViewHierarchy(dialog, rootView);\n"
+              "        dialog.setContentView(rootView);"
+          )
+          if old_styled_dialog in code and "prepareDialogViewHierarchy" not in code:
+              code = code.replace(old_styled_dialog, new_styled_dialog, 1)
 
-          new_styled_dialog = """    private void showStyledDialog(Dialog dialog, View rootView, float widthFraction, int heightSpec) {
-          prepareDialogViewHierarchy(dialog, rootView);
-          dialog.setContentView(rootView);"""
-
-          if old_styled_dialog_alt in code and "prepareDialogViewHierarchy" not in code:
-              code = code.replace(old_styled_dialog_alt, new_styled_dialog, 1)
-
-          # Also apply "ي" dot fix on Home screen pure text labels after showHomeScreen builds UI
           old_home_end = "if (restoreY > 0 && homeScrollView != null) {"
-          new_home_end = """applyUnclippedArabicTextLabels(rootContainer);
-                  if (restoreY > 0 && homeScrollView != null) {"""
+          new_home_end = "applyUnclippedArabicTextLabels(rootContainer);\n        if (restoreY > 0 && homeScrollView != null) {"
           if old_home_end in code and "applyUnclippedArabicTextLabels(rootContainer)" not in code:
               code = code.replace(old_home_end, new_home_end, 1)
-
-          helper_methods = """
-      private void ensureNoMediaInSafeVault(Uri vaultDirUri) {
-          if (folderUri == null || vaultDirUri == null) return;
-          try {
-              String vaultDocId = DocumentsContract.getDocumentId(vaultDirUri);
-              Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(folderUri, vaultDocId);
-              String[] proj = new String[]{DocumentsContract.Document.COLUMN_DISPLAY_NAME};
-              boolean exists = false;
-              try (Cursor c = getContentResolver().query(childrenUri, proj, null, null, null)) {
-                  if (c != null) {
-                      while (c.moveToNext()) {
-                          if (".nomedia".equals(c.getString(0))) {
-                              exists = true;
-                              break;
-                          }
-                      }
-                  }
-              }
-              if (!exists) {
-                  DocumentsContract.createDocument(getContentResolver(), vaultDirUri, "application/octet-stream", ".nomedia");
-              }
-          } catch (Exception ignored) {
-          }
-      }
-
-      @Override
-      public void onWindowFocusChanged(boolean hasFocus) {
-          super.onWindowFocusChanged(hasFocus);
-          if (!hasFocus && currentScreen == ScreenState.EDIT) {
-              saveCurrentFileImmediately(false);
-          }
-      }
-
-      @Override
-      protected void onStop() {
-          if (currentScreen == ScreenState.EDIT) {
-              saveCurrentFileImmediately(false);
-          }
-          super.onStop();
-      }
-
-      private void applyUnclippedArabicTextLabels(View view) {
-          if (view == null) return;
-          boolean allowFontPad = (getSelectedFontIndex() != 3);
-          if (view.getClass() == TextView.class && view != readTextView && view.getBackground() == null) {
-              ((TextView) view).setIncludeFontPadding(allowFontPad);
-          }
-          if (view instanceof ViewGroup) {
-              ViewGroup vg = (ViewGroup) view;
-              for (int i = 0; i < vg.getChildCount(); i++) {
-                  applyUnclippedArabicTextLabels(vg.getChildAt(i));
-              }
-          }
-      }
-
-      private void prepareDialogViewHierarchy(Dialog dialog, View rootView) {
-          if (rootView == null) return;
-          applyUnclippedArabicTextLabels(rootView);
-          rootView.setPadding(
-                  rootView.getPaddingLeft(),
-                  rootView.getPaddingTop(),
-                  rootView.getPaddingRight(),
-                  rootView.getPaddingBottom() + dp(4)
-          );
-          fixDialogButtonsAndResetLayout(rootView, rootView);
-      }
-
-      private void fixDialogButtonsAndResetLayout(View current, View rootView) {
-          if (current instanceof Button) {
-              Button btn = (Button) current;
-              ViewGroup.LayoutParams lp = btn.getLayoutParams();
-              if (lp instanceof ViewGroup.MarginLayoutParams) {
-                  ViewGroup.MarginLayoutParams mlp = (ViewGroup.MarginLayoutParams) lp;
-                  mlp.topMargin = Math.max(mlp.topMargin, dp(1));
-                  mlp.bottomMargin = Math.max(mlp.bottomMargin, dp(3));
-                  btn.setLayoutParams(mlp);
-              }
-              CharSequence txt = btn.getText();
-              if (txt != null && txt.toString().contains("الافتراضي") && rootView instanceof LinearLayout) {
-                  LinearLayout rootLinear = (LinearLayout) rootView;
-                  if (btn.getParent() instanceof ViewGroup) {
-                      ViewGroup parentGroup = (ViewGroup) btn.getParent();
-                      if (parentGroup != rootLinear || rootLinear.indexOfChild(btn) > 3) {
-                          parentGroup.removeView(btn);
-                          LinearLayout.LayoutParams topBtnLp = new LinearLayout.LayoutParams(
-                                  ViewGroup.LayoutParams.MATCH_PARENT, dp(42));
-                          topBtnLp.topMargin = dp(8);
-                          topBtnLp.bottomMargin = dp(8);
-                          int insertIdx = Math.min(2, rootLinear.getChildCount());
-                          rootLinear.addView(btn, insertIdx, topBtnLp);
-                          btn.setOnClickListener( e -> showResetToolbarConfirmDialog(btn) );
-                      }
-                  }
-              }
-          } else if (current instanceof ViewGroup) {
-              ViewGroup vg = (ViewGroup) current;
-              vg.setClipChildren(false);
-              vg.setClipToPadding(false);
-              List<View> children = new ArrayList<>();
-              for (int i = 0; i < vg.getChildCount(); i++) {
-                  children.add(vg.getChildAt(i));
-              }
-              for (View child : children) {
-                  fixDialogButtonsAndResetLayout(child, rootView);
-              }
-          }
-      }
-
-      private void showResetToolbarConfirmDialog(Button resetBtn) {
-          Dialog confirmDialog = new Dialog(this);
-          confirmDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-          LinearLayout box = new LinearLayout(this);
-          box.setOrientation(LinearLayout.VERTICAL);
-          box.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-          box.setBackground(roundedRect(getCardBgColor(), 18, 1, getBorderColor()));
-          box.setPadding(dp(20), dp(18), dp(20), dp(16));
-
-          TextView title = new TextView(this);
-          title.setText("استعادة الإعدادات الافتراضية");
-          title.setTextColor(getAccentTextColor());
-          title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
-          title.setTypeface(getAppTypeface(true));
-          title.setGravity(Gravity.RIGHT);
-          box.addView(title);
-
-          TextView msg = new TextView(this);
-          msg.setText("هل أنت متأكد أنك تريد استعادة الإعدادات الافتراضية؟");
-          msg.setTextColor(getTextPrimaryColor());
-          msg.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);
-          msg.setTypeface(getAppTypeface(false));
-          msg.setGravity(Gravity.RIGHT);
-          LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(
-                  ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-          mLp.topMargin = dp(10);
-          mLp.bottomMargin = dp(18);
-          box.addView(msg, mLp);
-
-          LinearLayout btnRow = new LinearLayout(this);
-          btnRow.setOrientation(LinearLayout.HORIZONTAL);
-
-          Button yesBtn = new Button(this);
-          configureTextButton(yesBtn, "نعم", 14, true, Color.WHITE, 44);
-          yesBtn.setBackground(roundedRect(getPrimaryColor(), 10, 0, 0));
-          yesBtn.setOnClickListener(v -> {
-              confirmDialog.dismiss();
-              Object tagListener = resetBtn.getTag();
-              if (tagListener instanceof View.OnClickListener) {
-                  ((View.OnClickListener) tagListener).onClick(resetBtn);
-              }
-          });
-          LinearLayout.LayoutParams b1Lp = new LinearLayout.LayoutParams(0, dp(44), 1f);
-          b1Lp.leftMargin = dp(6);
-          btnRow.addView(yesBtn, b1Lp);
-
-          Button noBtn = new Button(this);
-          configureTextButton(noBtn, "لا", 14, true, getTextPrimaryColor(), 44);
-          noBtn.setBackground(roundedRect(getSecondaryBtnBgColor(), 10, 1, getBorderColor()));
-          noBtn.setOnClickListener(v -> confirmDialog.dismiss());
-          LinearLayout.LayoutParams b2Lp = new LinearLayout.LayoutParams(0, dp(44), 1f);
-          b2Lp.rightMargin = dp(6);
-          btnRow.addView(noBtn, b2Lp);
-
-          box.addView(btnRow);
-          showStyledDialog(confirmDialog, box, 0.86f, ViewGroup.LayoutParams.WRAP_CONTENT);
-      }
-  """
 
           # Preserve original reset button click action inside its tag so "نعم" executes it
           old_reset_pattern = re.compile(
@@ -298,18 +128,185 @@ jobs:
           if match:
               btn_var = match.group(1)
               code = old_reset_pattern.sub(
-                  f'View.OnClickListener origResetAction = v -> {{\n            currentOrder.clear();',
+                  "View.OnClickListener origResetAction = v -> {\n            currentOrder.clear();",
                   code,
                   count=1
               )
-              # Attach origResetAction to both tag and listener
-              target_add = f'rebuildListRef[0].run();\n        }};'
+              target_add = "rebuildListRef[0].run();\n        });"
               if target_add in code:
                   code = code.replace(
                       target_add,
-                      target_add + f'\n        {btn_var}.setTag(origResetAction);\n        {btn_var}.setOnClickListener(origResetAction);',
+                      "rebuildListRef[0].run();\n        };\n        " + btn_var + ".setTag(origResetAction);\n        " + btn_var + ".setOnClickListener(origResetAction);",
                       1
                   )
+
+          helper_lines = [
+              "    private void ensureNoMediaInSafeVault(Uri vaultDirUri) {",
+              "        if (folderUri == null || vaultDirUri == null) return;",
+              "        try {",
+              "            String vaultDocId = DocumentsContract.getDocumentId(vaultDirUri);",
+              "            Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(folderUri, vaultDocId);",
+              "            String[] proj = new String[]{DocumentsContract.Document.COLUMN_DISPLAY_NAME};",
+              "            boolean exists = false;",
+              "            try (Cursor c = getContentResolver().query(childrenUri, proj, null, null, null)) {",
+              "                if (c != null) {",
+              "                    while (c.moveToNext()) {",
+              "                        if (\".nomedia\".equals(c.getString(0))) {",
+              "                            exists = true;",
+              "                            break;",
+              "                        }",
+              "                    }",
+              "                }",
+              "            }",
+              "            if (!exists) {",
+              "                DocumentsContract.createDocument(getContentResolver(), vaultDirUri, \"application/octet-stream\", \".nomedia\");",
+              "            }",
+              "        } catch (Exception ignored) {",
+              "        }",
+              "    }",
+              "",
+              "    @Override",
+              "    public void onWindowFocusChanged(boolean hasFocus) {",
+              "        super.onWindowFocusChanged(hasFocus);",
+              "        if (!hasFocus && currentScreen == ScreenState.EDIT) {",
+              "            saveCurrentFileImmediately(false);",
+              "        }",
+              "    }",
+              "",
+              "    @Override",
+              "    protected void onStop() {",
+              "        if (currentScreen == ScreenState.EDIT) {",
+              "            saveCurrentFileImmediately(false);",
+              "        }",
+              "        super.onStop();",
+              "    }",
+              "",
+              "    private void applyUnclippedArabicTextLabels(View view) {",
+              "        if (view == null) return;",
+              "        boolean allowFontPad = (getSelectedFontIndex() != 3);",
+              "        if (view.getClass() == TextView.class && view != readTextView && view.getBackground() == null) {",
+              "            ((TextView) view).setIncludeFontPadding(allowFontPad);",
+              "        }",
+              "        if (view instanceof ViewGroup) {",
+              "            ViewGroup vg = (ViewGroup) view;",
+              "            for (int i = 0; i < vg.getChildCount(); i++) {",
+              "                applyUnclippedArabicTextLabels(vg.getChildAt(i));",
+              "            }",
+              "        }",
+              "    }",
+              "",
+              "    private void prepareDialogViewHierarchy(Dialog dialog, View rootView) {",
+              "        if (rootView == null) return;",
+              "        applyUnclippedArabicTextLabels(rootView);",
+              "        rootView.setPadding(",
+              "                rootView.getPaddingLeft(),",
+              "                rootView.getPaddingTop(),",
+              "                rootView.getPaddingRight(),",
+              "                rootView.getPaddingBottom() + dp(4)",
+              "        );",
+              "        fixDialogButtonsAndResetLayout(rootView, rootView);",
+              "    }",
+              "",
+              "    private void fixDialogButtonsAndResetLayout(View current, View rootView) {",
+              "        if (current instanceof Button) {",
+              "            Button btn = (Button) current;",
+              "            ViewGroup.LayoutParams lp = btn.getLayoutParams();",
+              "            if (lp instanceof ViewGroup.MarginLayoutParams) {",
+              "                ViewGroup.MarginLayoutParams mlp = (ViewGroup.MarginLayoutParams) lp;",
+              "                mlp.topMargin = Math.max(mlp.topMargin, dp(1));",
+              "                mlp.bottomMargin = Math.max(mlp.bottomMargin, dp(3));",
+              "                btn.setLayoutParams(mlp);",
+              "            }",
+              "            CharSequence txt = btn.getText();",
+              "            if (txt != null && txt.toString().contains(\"الافتراضي\") && rootView instanceof LinearLayout) {",
+              "                LinearLayout rootLinear = (LinearLayout) rootView;",
+              "                if (btn.getParent() instanceof ViewGroup) {",
+              "                    ViewGroup parentGroup = (ViewGroup) btn.getParent();",
+              "                    if (parentGroup != rootLinear || rootLinear.indexOfChild(btn) > 3) {",
+              "                        parentGroup.removeView(btn);",
+              "                        LinearLayout.LayoutParams topBtnLp = new LinearLayout.LayoutParams(",
+              "                                ViewGroup.LayoutParams.MATCH_PARENT, dp(42));",
+              "                        topBtnLp.topMargin = dp(8);",
+              "                        topBtnLp.bottomMargin = dp(8);",
+              "                        int insertIdx = Math.min(2, rootLinear.getChildCount());",
+              "                        rootLinear.addView(btn, insertIdx, topBtnLp);",
+              "                        btn.setOnClickListener(e -> showResetToolbarConfirmDialog(btn));",
+              "                    }",
+              "                }",
+              "            }",
+              "        } else if (current instanceof ViewGroup) {",
+              "            ViewGroup vg = (ViewGroup) current;",
+              "            vg.setClipChildren(false);",
+              "            vg.setClipToPadding(false);",
+              "            List<View> children = new ArrayList<>();",
+              "            for (int i = 0; i < vg.getChildCount(); i++) {",
+              "                children.add(vg.getChildAt(i));",
+              "            }",
+              "            for (View child : children) {",
+              "                fixDialogButtonsAndResetLayout(child, rootView);",
+              "            }",
+              "        }",
+              "    }",
+              "",
+              "    private void showResetToolbarConfirmDialog(Button resetBtn) {",
+              "        Dialog confirmDialog = new Dialog(this);",
+              "        confirmDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);",
+              "        LinearLayout box = new LinearLayout(this);",
+              "        box.setOrientation(LinearLayout.VERTICAL);",
+              "        box.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);",
+              "        box.setBackground(roundedRect(getCardBgColor(), 18, 1, getBorderColor()));",
+              "        box.setPadding(dp(20), dp(18), dp(20), dp(16));",
+              "",
+              "        TextView title = new TextView(this);",
+              "        title.setText(\"استعادة الإعدادات الافتراضية\");",
+              "        title.setTextColor(getAccentTextColor());",
+              "        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);",
+              "        title.setTypeface(getAppTypeface(true));",
+              "        title.setGravity(Gravity.RIGHT);",
+              "        box.addView(title);",
+              "",
+              "        TextView msg = new TextView(this);",
+              "        msg.setText(\"هل أنت متأكد أنك تريد استعادة الإعدادات الافتراضية؟\");",
+              "        msg.setTextColor(getTextPrimaryColor());",
+              "        msg.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);",
+              "        msg.setTypeface(getAppTypeface(false));",
+              "        msg.setGravity(Gravity.RIGHT);",
+              "        LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(",
+              "                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);",
+              "        mLp.topMargin = dp(10);",
+              "        mLp.bottomMargin = dp(18);",
+              "        box.addView(msg, mLp);",
+              "",
+              "        LinearLayout btnRow = new LinearLayout(this);",
+              "        btnRow.setOrientation(LinearLayout.HORIZONTAL);",
+              "",
+              "        Button yesBtn = new Button(this);",
+              "        configureTextButton(yesBtn, \"نعم\", 14, true, Color.WHITE, 44);",
+              "        yesBtn.setBackground(roundedRect(getPrimaryColor(), 10, 0, 0));",
+              "        yesBtn.setOnClickListener(v -> {",
+              "            confirmDialog.dismiss();",
+              "            Object tagListener = resetBtn.getTag();",
+              "            if (tagListener instanceof View.OnClickListener) {",
+              "                ((View.OnClickListener) tagListener).onClick(resetBtn);",
+              "            }",
+              "        });",
+              "        LinearLayout.LayoutParams b1Lp = new LinearLayout.LayoutParams(0, dp(44), 1f);",
+              "        b1Lp.leftMargin = dp(6);",
+              "        btnRow.addView(yesBtn, b1Lp);",
+              "",
+              "        Button noBtn = new Button(this);",
+              "        configureTextButton(noBtn, \"لا\", 14, true, getTextPrimaryColor(), 44);",
+              "        noBtn.setBackground(roundedRect(getSecondaryBtnBgColor(), 10, 1, getBorderColor()));",
+              "        noBtn.setOnClickListener(v -> confirmDialog.dismiss());",
+              "        LinearLayout.LayoutParams b2Lp = new LinearLayout.LayoutParams(0, dp(44), 1f);",
+              "        b2Lp.rightMargin = dp(6);",
+              "        btnRow.addView(noBtn, b2Lp);",
+              "",
+              "        box.addView(btnRow);",
+              "        showStyledDialog(confirmDialog, box, 0.86f, ViewGroup.LayoutParams.WRAP_CONTENT);",
+              "    }"
+          ]
+          helper_methods = "\n" + "\n".join(helper_lines) + "\n"
 
           if "prepareDialogViewHierarchy" not in code:
               last_brace = code.rfind("}")
@@ -318,7 +315,9 @@ jobs:
 
           with open(path, "w", encoding="utf-8") as f:
               f.write(code)
-          EOF
+          PYEOF
+          python3 patch_app.py
+          rm -f patch_app.py
 
       - name: Download All 12 Open-Source Arabic Fonts
         run: |
@@ -491,22 +490,26 @@ jobs:
           </vector>
           EOF
 
-          # Ensure any other ic_* drawable referenced in MainActivity.java exists
-          python3 - << 'PYEOF'
+          cat << 'PYEOF' > gen_icons.py
           import os, re
           with open("app/src/main/java/com/mazwd/app/MainActivity.java", "r", encoding="utf-8") as f:
               content = f.read()
           names = set(re.findall(r'"(ic_[a-zA-Z0-9_]+)"', content))
+          fallback = (
+              '<vector xmlns:android="http://schemas.android.com/apk/res/android" '
+              'android:width="24dp" android:height="24dp" '
+              'android:viewportWidth="24" android:viewportHeight="24">'
+              '<path android:fillColor="#FFFFFFFF" android:pathData="M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2z"/>'
+              '</vector>'
+          )
           for name in names:
               p = f"app/src/main/res/drawable/{name}.xml"
               if not os.path.exists(p):
                   with open(p, "w", encoding="utf-8") as out:
-                      out.write('''<vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp" android:height="24dp"
-              android:viewportWidth="24" android:viewportHeight="24">
-              <path android:fillColor="#FFFFFFFF" android:pathData="M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2z"/>
-          </vector>''')
+                      out.write(fallback)
           PYEOF
+          python3 gen_icons.py
+          rm -f gen_icons.py
 
       - name: Create AndroidManifest & Gradle Files
         run: |
