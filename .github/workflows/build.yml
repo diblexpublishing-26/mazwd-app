@@ -49,6 +49,20 @@ jobs:
 
       - name: Generate Android Project Structure & Resources
         run: |
+          mkdir -p app/src/main/java/com/mazwd/app
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/font
+
+          if [ -f "MainActivity.java" ]; then
+            cp MainActivity.java app/src/main/java/com/mazwd/app/MainActivity.java
+          else
+            FOUND_FILE=$(find . -name "MainActivity.java" | head -n 1)
+            if [ -n "$FOUND_FILE" ] && [ "$FOUND_FILE" != "./app/src/main/java/com/mazwd/app/MainActivity.java" ]; then
+              cp "$FOUND_FILE" app/src/main/java/com/mazwd/app/MainActivity.java
+            fi
+          fi
+
           sed -i '/^\x60/d' app/src/main/java/com/mazwd/app/MainActivity.java
 
           cat << 'EOF' > settings.gradle
@@ -78,10 +92,6 @@ jobs:
           org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
           android.useAndroidX=false
           EOF
-
-          mkdir -p app/src/main/res/values
-          mkdir -p app/src/main/res/drawable
-          mkdir -p app/src/main/res/font
 
           curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/almarai/Almarai-Regular.ttf" -o app/src/main/res/font/mazwd_arabic.ttf
           curl -L -s "https://raw.githubusercontent.com/google/fonts/main/ofl/almarai/Almarai-Bold.ttf" -o app/src/main/res/font/mazwd_arabic_bold.ttf
